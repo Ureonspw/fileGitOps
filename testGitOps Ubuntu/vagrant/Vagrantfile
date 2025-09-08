@@ -5,6 +5,7 @@ Vagrant.configure("2") do |config|
     dev.vm.hostname = "dev-server"
 
     dev.vm.network "private_network", ip: "192.168.33.10"
+    # dev.vm.network "public_network", bridge: "en0: Wi-Fi (AirPort)"
     # Ports forwardés (optionnels)
     dev.vm.network "forwarded_port", guest: 8080, host: 8080
     dev.vm.network "forwarded_port", guest: 8090, host: 8090

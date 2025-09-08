@@ -3,7 +3,7 @@ set -e
 
 echo "=== Mise à jour et installation des prérequis ==="
 sudo apt-get -y update
-sudo apt-get -y install -y software-properties-common curl wget apt-transport-https gnupg lsb-release
+sudo apt-get -y install software-properties-common curl wget apt-transport-https gnupg lsb-release expect
 
 echo "=== Installation Podman / Buildah ==="
 echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_20.04/ /" | sudo tee /etc/apt/sources.list.d/libcontainers.list
@@ -61,6 +61,78 @@ echo "=== Récupération du mot de passe ArgoCD ==="
 ARGOCD_PWD=$(sudo kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d)
 
+
+
+
+
+
+# === Lancer coder server en background sous vagrant ===
+# sudo rm -f /home/vagrant/coder.log /home/vagrant/coder.pid
+
+sudo -u vagrant bash -c "nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid"
+SERVER_PID=$(cat /home/vagrant/coder.pid)
+echo "Coder server lancé avec PID $SERVER_PID"
+
+# === Attente que le lien soit disponible ===
+echo "⏳ Attente du lien Coder..."
+for i in {1..30}; do
+  LINK=$(grep -o "https://[a-z0-9]\+\.pit-1\.try\.coder\.app" /home/vagrant/coder.log | head -n 1 || true)
+  if [ -n "$LINK" ]; then
+    break
+  fi
+  sleep 2
+done
+
+if [ -z "$LINK" ]; then
+  echo "❌ Impossible de récupérer le lien Coder"
+  kill -SIGINT $SERVER_PID
+  exit 1
+fi
+
+echo "Lien trouvé : $LINK"
+
+# === Script expect temporaire pour créer le premier utilisateur ===
+cat << 'EOF' > /home/vagrant/coder-init.exp
+#!/usr/bin/expect -f
+
+set timeout -1
+set link [lindex $argv 0]
+set username "vagrant"
+set name "admin"
+set email "admin@gmail.com"
+set password "SuperPassw0rd!"
+
+spawn coder login $link
+expect "Would you like to create the first user? (yes/no)" { send "yes\r" }
+expect "What  username" { send "$username\r" }
+expect "What  name" { send "$name\r" }
+expect "What's your  email" { send "$email\r" }
+expect "Enter a  password" { send "$password\r" }
+expect "Confirm  password" { send "$password\r" }
+expect "Start a trial of Enterprise? (yes/no)" { send "no\r" }
+interact
+EOF
+
+chmod +x /home/vagrant/coder-init.exp
+
+# === Exécuter l'automatisation ===
+sudo -u vagrant /home/vagrant/coder-init.exp $LINK
+rm -f /home/vagrant/coder-init.exp
+
+# === Arrêter le serveur (comme Ctrl+C) ===
+kill -SIGINT $SERVER_PID
+echo "Coder server arrêté proprement."
+
+
+
+
+
+
+
+
+
+
+
 echo "=============================================="
 echo " 🌍 Accédez à ArgoCD :"
 echo ""
@@ -70,6 +142,9 @@ echo " Lien : http://$VM_IP:8090"
 echo ""
 echo " Lancez la commande suivante pour exposer ArgoCD :"
 echo "   sudo kubectl port-forward --address 0.0.0.0 svc/argocd-server 8090:80 -n argocd"
+echo "lancer code server : coder server"
+echo " lancer coder server en arriere plan :"
+echo " sudo -u vagrant bash -c "nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid"
 echo "=============================================="
 
 echo "✅ Installation complète terminée avec succès"
