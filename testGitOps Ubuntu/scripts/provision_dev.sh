@@ -6,8 +6,6 @@ sudo apt-get -y update
 sudo apt-get -y install software-properties-common curl wget apt-transport-https gnupg lsb-release expect
 
 echo "=== Installation Podman / Buildah ==="
-echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_20.04/ /" | sudo tee /etc/apt/sources.list.d/libcontainers.list
-curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_20.04/Release.key" | sudo apt-key add -
 sudo apt-get -y update
 sudo apt-get -y install -y buildah podman runc
 
@@ -64,19 +62,29 @@ ARGOCD_PWD=$(sudo kubectl -n argocd get secret argocd-initial-admin-secret \
 
 
 
+cat << 'EOF' > lancement.sh
 
 
-# === Lancer coder server en background sous vagrant ===
-# sudo rm -f /home/vagrant/coder.log /home/vagrant/coder.pid
+#!/bin/bash
 
-sudo -u vagrant bash -c "nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid"
-SERVER_PID=$(cat /home/vagrant/coder.pid)
+# === Dossier de destination ===
+DEST_DIR="/home/vagrant/scripts"
+mkdir -p "$DEST_DIR"
+
+# === Générer le fichier template_Account dans le dossier ===
+
+LOG_DIR="/home/vagrant/scripts"
+
+echo "=== Lancer Coder server en arrière-plan ==="
+sudo -u vagrant bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
+
+SERVER_PID=$(cat $LOG_DIR/coder.pid)
 echo "Coder server lancé avec PID $SERVER_PID"
 
 # === Attente que le lien soit disponible ===
 echo "⏳ Attente du lien Coder..."
 for i in {1..30}; do
-  LINK=$(grep -o "https://[a-z0-9]\+\.pit-1\.try\.coder\.app" /home/vagrant/coder.log | head -n 1 || true)
+  LINK=$(grep -o "https://[a-z0-9]\+\.pit-1\.try\.coder\.app" $LOG_DIR/coder.log | head -n 1 || true)
   if [ -n "$LINK" ]; then
     break
   fi
@@ -91,37 +99,303 @@ fi
 
 echo "Lien trouvé : $LINK"
 
-# === Script expect temporaire pour créer le premier utilisateur ===
-cat << 'EOF' > /home/vagrant/coder-init.exp
-#!/usr/bin/expect -f
+# === Lancer Coder login en interactif (tu remplis manuellement) ===
+sudo -u vagrant coder login $LINK
 
-set timeout -1
-set link [lindex $argv 0]
-set username "vagrant"
-set name "admin"
-set email "admin@gmail.com"
-set password "SuperPassw0rd!"
+# === Une fois terminé, on continue ===
+echo "✅ Utilisateur créé avec succès."
 
-spawn coder login $link
-expect "Would you like to create the first user? (yes/no)" { send "yes\r" }
-expect "What  username" { send "$username\r" }
-expect "What  name" { send "$name\r" }
-expect "What's your  email" { send "$email\r" }
-expect "Enter a  password" { send "$password\r" }
-expect "Confirm  password" { send "$password\r" }
-expect "Start a trial of Enterprise? (yes/no)" { send "no\r" }
-interact
-EOF
+systemctl --user enable --now podman.socket
 
-chmod +x /home/vagrant/coder-init.exp
+ mkdir podmantemplate
+cat << 'EOF_MAIN' > podmantemplate/main.tf
 
-# === Exécuter l'automatisation ===
-sudo -u vagrant /home/vagrant/coder-init.exp $LINK
-rm -f /home/vagrant/coder-init.exp
+
+terraform {
+  required_providers {
+    coder = {
+      source = "coder/coder"
+    }
+    docker = {
+      source = "kreuzwerker/docker"
+    }
+  }
+}
+
+locals {
+  username = data.coder_workspace_owner.me.name
+}
+
+variable "docker_socket" {
+  default     = "unix:///run/user/1000/podman/podman.sock"
+  description = "(Optional) Podman/Docker socket URI"
+  type        = string
+}
+
+provider "docker" {
+  host = var.docker_socket != "" ? var.docker_socket : null
+}
+
+data "coder_provisioner" "me" {}
+data "coder_workspace" "me" {}
+data "coder_workspace_owner" "me" {}
+
+resource "coder_agent" "main" {
+  arch           = data.coder_provisioner.me.arch
+  os             = "linux"
+  startup_script = <<-EOT
+    set -e
+
+    # Prépare le home utilisateur au premier démarrage
+    if [ ! -f ~/.init_done ]; then
+      cp -rT /etc/skel ~
+      touch ~/.init_done
+    fi
+  EOT
+
+  env = {
+    GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_AUTHOR_EMAIL    = "${data.coder_workspace_owner.me.email}"
+    GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_COMMITTER_EMAIL = "${data.coder_workspace_owner.me.email}"
+  }
+
+  metadata {
+    display_name = "CPU Usage"
+    key          = "0_cpu_usage"
+    script       = "coder stat cpu"
+    interval     = 10
+    timeout      = 1
+  }
+
+  metadata {
+    display_name = "RAM Usage"
+    key          = "1_ram_usage"
+    script       = "coder stat mem"
+    interval     = 10
+    timeout      = 1
+  }
+
+  metadata {
+    display_name = "Home Disk"
+    key          = "3_home_disk"
+    script       = "coder stat disk --path $${HOME}"
+    interval     = 60
+    timeout      = 1
+  }
+
+  metadata {
+    display_name = "CPU Usage (Host)"
+    key          = "4_cpu_usage_host"
+    script       = "coder stat cpu --host"
+    interval     = 10
+    timeout      = 1
+  }
+
+  metadata {
+    display_name = "Memory Usage (Host)"
+    key          = "5_mem_usage_host"
+    script       = "coder stat mem --host"
+    interval     = 10
+    timeout      = 1
+  }
+
+  metadata {
+    display_name = "Load Average (Host)"
+    key          = "6_load_host"
+    script   = <<EOT
+      echo "`cat /proc/loadavg | awk '{ print $1 }'` `nproc`" | awk '{ printf "%0.2f", $1/$2 }'
+    EOT
+    interval = 60
+    timeout  = 1
+  }
+
+  metadata {
+    display_name = "Swap Usage (Host)"
+    key          = "7_swap_host"
+    script       = <<EOT
+      free -b | awk '/^Swap/ { printf("%.1f/%.1f", $3/1024.0/1024.0/1024.0, $2/1024.0/1024.0/1024.0) }'
+    EOT
+    interval     = 10
+    timeout      = 1
+  }
+}
+
+module "code-server" {
+  count  = data.coder_workspace.me.start_count
+  source = "registry.coder.com/coder/code-server/coder"
+  version = "~> 1.0"
+
+  agent_id = coder_agent.main.id
+  order    = 1
+}
+
+module "jetbrains_gateway" {
+  count  = data.coder_workspace.me.start_count
+  source = "registry.coder.com/coder/jetbrains-gateway/coder"
+
+  jetbrains_ides = ["IU", "PS", "WS", "PY", "CL", "GO", "RM", "RD", "RR"]
+  default        = "IU"
+  folder         = "/home/coder"
+
+  version    = "~> 1.0"
+  agent_id   = coder_agent.main.id
+  agent_name = "main"
+  order      = 2
+}
+
+resource "docker_volume" "home_volume" {
+  name = "coder-${data.coder_workspace.me.id}-home"
+
+  lifecycle {
+    ignore_changes = all
+  }
+
+  labels {
+    label = "coder.owner"
+    value = data.coder_workspace_owner.me.name
+  }
+  labels {
+    label = "coder.owner_id"
+    value = data.coder_workspace_owner.me.id
+  }
+  labels {
+    label = "coder.workspace_id"
+    value = data.coder_workspace.me.id
+  }
+  labels {
+    label = "coder.workspace_name_at_creation"
+    value = data.coder_workspace.me.name
+  }
+}
+
+resource "docker_container" "workspace" {
+  count = data.coder_workspace.me.start_count
+  image = "codercom/enterprise-base:ubuntu"
+
+  name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
+  hostname = data.coder_workspace.me.name
+
+  entrypoint = [
+    "sh", "-c",
+    replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.containers.internal")
+  ]
+
+  env = ["CODER_AGENT_TOKEN=${coder_agent.main.token}"]
+
+  host {
+    host = "host.containers.internal"
+    ip   = "host-gateway"
+  }
+
+  volumes {
+    container_path = "/home/coder"
+    volume_name    = docker_volume.home_volume.name
+    read_only      = false
+  }
+
+  labels {
+    label = "coder.owner"
+    value = data.coder_workspace_owner.me.name
+  }
+  labels {
+    label = "coder.owner_id"
+    value = data.coder_workspace_owner.me.id
+  }
+  labels {
+    label = "coder.workspace_id"
+    value = data.coder_workspace.me.id
+  }
+  labels {
+    label = "coder.workspace_name"
+    value = data.coder_workspace.me.name
+  }
+}
+
+EOF_MAIN
+
+
+
+
+
+
+
+
+cat << 'EOF_README' > podmantemplate/README.md
+
+
+---
+display_name: CODE_SERVER_PODMAN
+description: le template de base avec les container podman
+icon: ../../../site/static/emojis/1f4e6.png
+maintainer_github: coder
+verified: true
+tags: []
+---
+
+# A minimal Scaffolding for a Coder Template
+
+c'est mon template que j'ai creer de base avec podman et codeserver. Il creeras ton workspace avec un container podman et un codeserver.
+
+## Usage
+
+### Launch a workspace
+
+To launch a workspace, you can click on the "Run" button or use the following command:
+
+```bash
+coder run coder/code-server-podman
+```
+
+### Connect to the workspace
+
+Once the workspace is running, you can connect to it using the following command:
+
+```bash
+coder connect coder/code-server-podman
+```
+
+### Stop the workspace
+
+To stop the workspace, you can use the following command:
+
+```bash
+coder stop coder/code-server-podman
+```
+
+## Development
+
+To develop this template, you can use the following command:
+
+```bash
+coder dev
+```
+
+This will stream local changes to the template and automatically restart the workspace.
+
+EOF_README
+
+cd podmantemplate
+coder template push -y  
+
+
+
+
 
 # === Arrêter le serveur (comme Ctrl+C) ===
 kill -SIGINT $SERVER_PID
-echo "Coder server arrêté proprement."
+
+
+
+echo "✅ Le script template_Account a été généré dans $DEST_DIR"
+echo "👉 Les logs et PID seront aussi stockés dans $DEST_DIR"
+
+EOF
+
+chmod +x lancement.sh
+
+
+
 
 
 
@@ -142,9 +416,10 @@ echo " Lien : http://$VM_IP:8090"
 echo ""
 echo " Lancez la commande suivante pour exposer ArgoCD :"
 echo "   sudo kubectl port-forward --address 0.0.0.0 svc/argocd-server 8090:80 -n argocd"
-echo "lancer code server : coder server"
-echo " lancer coder server en arriere plan :"
-echo " sudo -u vagrant bash -c "nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid"
+echo " lancer code server : coder server"
+echo " lancer coder server en arrière-plan :"
+echo "   sudo -u vagrant bash -c \"nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid\""
 echo "=============================================="
+
 
 echo "✅ Installation complète terminée avec succès"

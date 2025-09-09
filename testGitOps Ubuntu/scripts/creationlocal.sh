@@ -11,7 +11,7 @@ mkdir -p "$VAGRANT_DIR"
 # Créer le Vagrantfile
 cat > "$VAGRANT_DIR/Vagrantfile" <<'EOT'
 Vagrant.configure("2") do |config|
-  config.vm.box = "ubuntu/focal64"
+  config.vm.box = "ubuntu/jammy64"
 
   config.vm.define "dev-server" do |dev|
     dev.vm.hostname = "dev-server"
