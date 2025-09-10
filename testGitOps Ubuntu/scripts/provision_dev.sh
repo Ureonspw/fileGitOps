@@ -160,21 +160,6 @@ resource "coder_agent" "main" {
     GIT_COMMITTER_EMAIL = "${data.coder_workspace_owner.me.email}"
   }
 
-  metadata {
-    display_name = "CPU Usage"
-    key          = "0_cpu_usage"
-    script       = "coder stat cpu"
-    interval     = 10
-    timeout      = 1
-  }
-
-  metadata {
-    display_name = "RAM Usage"
-    key          = "1_ram_usage"
-    script       = "coder stat mem"
-    interval     = 10
-    timeout      = 1
-  }
 
   metadata {
     display_name = "Home Disk"
@@ -185,7 +170,7 @@ resource "coder_agent" "main" {
   }
 
   metadata {
-    display_name = "CPU Usage (Host)"
+    display_name = "CPU Usage"
     key          = "4_cpu_usage_host"
     script       = "coder stat cpu --host"
     interval     = 10
@@ -193,7 +178,7 @@ resource "coder_agent" "main" {
   }
 
   metadata {
-    display_name = "Memory Usage (Host)"
+    display_name = "Memory Usage"
     key          = "5_mem_usage_host"
     script       = "coder stat mem --host"
     interval     = 10
