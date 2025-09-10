@@ -107,7 +107,7 @@ echo "✅ Utilisateur créé avec succès."
 
 systemctl --user enable --now podman.socket
 
- mkdir podmantemplate
+mkdir podmantemplate
 cat << 'EOF_MAIN' > podmantemplate/main.tf
 
 
@@ -314,15 +314,7 @@ resource "docker_container" "workspace" {
 
 EOF_MAIN
 
-
-
-
-
-
-
-
 cat << 'EOF_README' > podmantemplate/README.md
-
 
 ---
 display_name: CODE_SERVER_PODMAN
@@ -337,45 +329,10 @@ tags: []
 
 c'est mon template que j'ai creer de base avec podman et codeserver. Il creeras ton workspace avec un container podman et un codeserver.
 
-## Usage
-
-### Launch a workspace
-
-To launch a workspace, you can click on the "Run" button or use the following command:
-
-```bash
-coder run coder/code-server-podman
-```
-
-### Connect to the workspace
-
-Once the workspace is running, you can connect to it using the following command:
-
-```bash
-coder connect coder/code-server-podman
-```
-
-### Stop the workspace
-
-To stop the workspace, you can use the following command:
-
-```bash
-coder stop coder/code-server-podman
-```
-
-## Development
-
-To develop this template, you can use the following command:
-
-```bash
-coder dev
-```
-
-This will stream local changes to the template and automatically restart the workspace.
-
 EOF_README
 
 cd podmantemplate
+
 coder template push -y  
 
 
@@ -407,6 +364,7 @@ chmod +x lancement.sh
 
 
 
+
 echo "=============================================="
 echo " 🌍 Accédez à ArgoCD :"
 echo ""
@@ -419,7 +377,7 @@ echo "   sudo kubectl port-forward --address 0.0.0.0 svc/argocd-server 8090:80 -
 echo " lancer code server : coder server"
 echo " lancer coder server en arrière-plan :"
 echo "   sudo -u vagrant bash -c \"nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid\""
+echo " 🚀 Pour créer le template : ./lancement.sh"
 echo "=============================================="
-
 
 echo "✅ Installation complète terminée avec succès"
