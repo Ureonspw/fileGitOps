@@ -61,7 +61,8 @@ sudo k3s kubectl get all -n argocd
 ARGOCD_PWD=$(sudo k3s kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d)
 
-
+echo "=== Installation de Coder ==="
+curl -fsSL https://coder.com/install.sh | sh
 
 
 
