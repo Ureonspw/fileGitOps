@@ -14,54 +14,6 @@ EOF
 sudo cp /etc/containers/containers.conf /usr/share/containers/containers.conf
 
 
-echo "=== Installation de K3s (Flannel par défaut actif) ==="
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=" - write-kubeconfig=$HOME/local-cluster.config - write-kubeconfig-mode=644" sh -
-
-echo "=== Vérification du service K3s ==="
-sudo systemctl status k3s
-
-echo "=== Mise à jour du PATH pour vagrant ==="
-grep -qxF 'export PATH=$PATH:/usr/local/bin' /home/vagrant/.bashrc || echo 'export PATH=$PATH:/usr/local/bin' | sudo tee -a /home/vagrant/.bashrc
-
-echo "=== Lien symbolique de k3s dans /usr/bin ==="
-sudo ln -sf /usr/local/bin/k3s /usr/bin/k3s
-
-
-echo "=== Attente que le cluster K3s ait au moins 1 nœud ==="
-for i in {1..30}; do
-  nodes=$(/usr/local/bin/k3s kubectl get nodes --no-headers 2>/dev/null | wc -l)
-  if [[ $nodes -ge 1 ]]; then
-    echo "✅ Nœud détecté"
-    break
-  fi
-  echo "⏳ Aucun nœud détecté, nouvelle tentative..."
-  sleep 5
-done
-
-echo "=== Attente que tous les nœuds soient Ready (max 120s) ==="
-if ! /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=120s; then
-  echo "❌ Timeout: Cluster non prêt"
-  /usr/local/bin/k3s kubectl get nodes -o wide
-  exit 1
-fi
-echo "✅ Cluster prêt"
-
-
-echo "=== Création du namespace argocd ==="
-/usr/local/bin/k3s kubectl create ns argocd
-
-echo "=== Installation d'ArgoCD ==="
-wget https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml -O install.yaml
-/usr/local/bin/k3s kubectl apply -n argocd -f install.yaml
-
-sudo k3s kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
-sudo k3s kubectl get all -n argocd
-
-
-ARGOCD_PWD=$(sudo k3s kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d)
-
-
 sudo tee /etc/containers/systemd/forgejo.network > /dev/null << 'EOF'
 [Network]
 NetworkName=forgejo
@@ -131,49 +83,88 @@ sudo systemctl start forgejo
 
 
 
+echo "=== Récupération IP de la VM ==="
+VM_IP=$(hostname -I | tr ' ' '\n' | grep '^192\.168\.' | head -n 1)
+VM_IP=${VM_IP:-127.0.0.1}
+echo "[INFO] IP détectée : $VM_IP"
+
+HARBOR_DIR=/opt/harbor
+CERT_DIR=/etc/harbor/certs
+HARBOR_VERSION="v2.11.0"
+HARBOR_PASSWORD="Harbor12345"
+
+echo "[INFO] Installation des dépendances..."
+sudo dnf install -y wget curl tar dnf-plugins-core openssl podman
+
+# Installer Docker CE et plugin Compose
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+
+echo "[INFO] Téléchargement de Harbor..."
+cd /tmp
+wget https://github.com/goharbor/harbor/releases/download/$HARBOR_VERSION/harbor-online-installer-$HARBOR_VERSION.tgz
+tar xvf harbor-online-installer-$HARBOR_VERSION.tgz
+sudo mv harbor $HARBOR_DIR
+cd $HARBOR_DIR
+sudo cp harbor.yml.tmpl harbor.yml
+
+echo "[INFO] Génération des certificats SSL avec SAN..."
+sudo mkdir -p $CERT_DIR
+
+cat > /tmp/harbor-openssl.cnf <<EOF
+[req]
+default_bits       = 4096
+distinguished_name = req_distinguished_name
+req_extensions     = v3_req
+prompt             = no
+
+[req_distinguished_name]
+C  = CI
+ST = Abidjan
+L  = Abidjan
+O  = HarborLab
+CN = $VM_IP
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 = $VM_IP
+EOF
+
+openssl req -x509 -nodes -days 365 \
+ -keyout $CERT_DIR/harbor.key \
+ -out $CERT_DIR/harbor.crt \
+ -config /tmp/harbor-openssl.cnf -extensions v3_req
+
+echo "[INFO] Configuration de harbor.yml..."
+sudo sed -i "s/hostname:.*/hostname: $VM_IP/" harbor.yml
+sudo sed -i "s#harbor_admin_password:.*#harbor_admin_password: $HARBOR_PASSWORD#" harbor.yml
+sudo sed -i "s#certificate:.*#certificate: $CERT_DIR/harbor.crt#" harbor.yml
+sudo sed -i "s#private_key:.*#private_key: $CERT_DIR/harbor.key#" harbor.yml
+
+echo "[INFO] Installation de Harbor..."
+sudo ./install.sh
+
+echo "[INFO] Configuration Podman pour le certificat..."
+sudo mkdir -p /etc/containers/certs.d/$VM_IP
+sudo cp $CERT_DIR/harbor.crt /etc/containers/certs.d/$VM_IP/ca.crt
+
+
+
+echo "======================================================="
+echo " Harbor est installé avec succès !"
+echo " Accès web : https://$VM_IP"
+echo " Login : admin / $HARBOR_PASSWORD"
+echo " forgejo est installé avec succès !"
+echo " Accès web : http://$VM_IP:3001"
+
+echo "======================================================="
 
 
 
 
-
-echo "=============================================="
-echo " 🌍 Accedez a ArgoCD  :"
-echo ""
-echo " 👤 Username : admin"
-echo " 🔑 Password : $ARGOCD_PWD"
-echo " lien vers le service : http://192.168.33.10:8090"
-echo " comment lancer le service :  sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd "
-echo "pour creer une nouvelle app a traver argo via le cli (exemple foncctionnel): sudo k3s kubectl apply -f https://raw.githubusercontent.com/Ureonspw/testimgnigx/main/k8s/application.yaml -n argocd"
-echo " lancer code server : coder server"
-echo " lancer coder server en arrière-plan :"
-echo "   sudo -u vagrant bash -c \"nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid\""
-echo " 🚀 Pour créer le template : ./lancement.sh"
-echo "=============================================="
-
-
-
-
-
-# echo "=== Attente que les pods ArgoCD soient prêts (max 300s) ==="
-# if ! /usr/local/bin/k3s kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s; then
-#   echo "❌ Timeout: certains pods ArgoCD ne sont pas prêts"
-#   /usr/local/bin/k3s kubectl get pods -n argocd -o wide
-#   exit 1
-# fi
-# echo "✅ Tous les pods ArgoCD sont prêts"
-
-# echo "=== Récupération du mot de passe admin ArgoCD ==="
-# /usr/local/bin/k3s kubectl -n argocd get secret argocd-initial-admin-secret \
-#   -o jsonpath="{.data.password}" | base64 -d
-# echo
-
-# echo "=== Installation CLI ArgoCD ==="
-# curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-# sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
-# rm argocd-linux-amd64
-
-# echo "=== État final des pods ArgoCD ==="
-# /usr/local/bin/k3s kubectl get pods -n argocd -o wide
 
 
 echo "✅ Installation complète d'ArgoCD avec K3s"
