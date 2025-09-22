@@ -19,19 +19,133 @@ readonly TITLE="\033[1;35m"           # violet clair subtil
 readonly BORDER="\033[0;35m"          # violet profond
 readonly ERROR="\033[1;31m"           # rouge pour les erreurs
 readonly SUCCESS="\033[1;32m"         # vert pour les succès
+readonly WARNING="\033[1;93m"         # jaune pour les avertissements
 
 # Configuration du menu
 readonly MENU_WIDTH=60
 readonly SCRIPT_NAME="HIFADHI ONE-CLICK-PROVISIONING"
 
+# Chemins des dossiers de provisionnement
+readonly ROCKY_PATH="testGitOps Rocky"
+readonly UBUNTU_PATH="testGitOps Ubuntu"
+readonly SERVERREPO_PATH="serveur_DOCKGIT"
+
 # Options des menus
 readonly MAIN_OPTIONS=("Installer les outils" "Lancer un provisionnement" "Aide" "Supprimer un provisionnement" "Quitter")
 readonly INSTALL_OPTIONS=("Mac (brew)" "Mac (sans brew)" "Linux Ubuntu" "Linux CentOS" "Retour")
-readonly PROVISION_OPTIONS=("Local" "Cloud" "Retour")
 
 # Variables globales
 selected_main=0
 
+# ==============================
+# FONCTIONS DE VÉRIFICATION
+# ==============================
+
+check_provisioning_status() {
+    local rocky_exists=false
+    local ubuntu_exists=false
+    local serverrepo_exists=false
+    
+    # Vérifier l'existence des dossiers vagrant
+    if [ -d "$ROCKY_PATH/vagrant" ]; then
+        rocky_exists=true
+    fi
+    
+    if [ -d "$UBUNTU_PATH/vagrant" ]; then
+        ubuntu_exists=true
+    fi
+    
+    if [ -d "$SERVERREPO_PATH/vagrant" ]; then
+        serverrepo_exists=true
+    fi
+    
+    # CORRECTION: Retourner les 3 valeurs séparées par :
+    echo "$rocky_exists:$ubuntu_exists:$serverrepo_exists"
+}
+
+
+get_available_provision_options() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    local options=()
+    
+    # Ajouter les options disponibles pour provisionnement
+    if [ "$rocky_exists" = "false" ]; then
+        options+=("Rocky_DEV")
+    fi
+    
+    if [ "$ubuntu_exists" = "false" ]; then
+        options+=("Ubuntu_DEV")
+    fi
+    
+    if [ "$serverrepo_exists" = "false" ]; then
+        options+=("serverRepo")
+    fi
+    
+    options+=("Cloud" "Retour")
+    
+    echo "${options[@]}"
+}
+
+
+get_available_delete_options() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    local options=()
+    
+    # Ajouter les options disponibles pour suppression
+    if [ "$rocky_exists" = "true" ]; then
+        options+=("Rocky_DEV")
+    fi
+    
+    if [ "$ubuntu_exists" = "true" ]; then
+        options+=("Ubuntu_DEV")
+    fi
+    
+    if [ "$serverrepo_exists" = "true" ]; then
+        options+=("serverRepo")
+    fi
+    
+    options+=("Cloud" "Retour")
+    
+    echo "${options[@]}"
+}
+
+
+show_provisioning_status() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    echo -e "\n${TITLE}=== ÉTAT DES PROVISIONNEMENTS ===${NORMAL}"
+    
+    if [ "$rocky_exists" = "true" ]; then
+        echo -e "${SUCCESS}✓ Rocky Linux${NORMAL} - Provisionnement existant"
+    else
+        echo -e "${TEXT}○ Rocky Linux${NORMAL} - Pas de provisionnement"
+    fi
+    
+    if [ "$ubuntu_exists" = "true" ]; then
+        echo -e "${SUCCESS}✓ Ubuntu${NORMAL} - Provisionnement existant"
+    else
+        echo -e "${TEXT}○ Ubuntu${NORMAL} - Pas de provisionnement"
+    fi
+    
+    if [ "$serverrepo_exists" = "true" ]; then
+        echo -e "${SUCCESS}✓ serverRepo${NORMAL} - Provisionnement existant"
+    else
+        echo -e "${TEXT}○ serverRepo${NORMAL} - Pas de provisionnement"
+    fi
+    
+    echo ""
+}
 # ==============================
 # FONCTIONS UTILITAIRES
 # ==============================
@@ -46,6 +160,10 @@ log_success() {
 
 log_error() {
     echo -e "${ERROR}[ERROR]${NORMAL} $1" >&2
+}
+
+log_warning() {
+    echo -e "${WARNING}[WARNING]${NORMAL} $1"
 }
 
 wait_for_key() {
@@ -244,21 +362,100 @@ install_tools() {
 # FONCTIONS DE PROVISIONNEMENT
 # ==============================
 
-launch_local_provision() {
-    log_info "Lancement du provisionnement local..."
+launch_rocky_provision() {
+    log_info "Lancement du provisionnement Rocky Linux..."
+    
+    # Vérifier si le provisionnement existe déjà
+    if [ -d "$ROCKY_PATH/vagrant" ]; then
+        log_warning "Un provisionnement Rocky Linux existe déjà !"
+        log_info "Veuillez d'abord le supprimer avant d'en créer un nouveau."
+        return 1
+    fi
     
     # Vérifier les prérequis
-    if ! check_command terraform || ! check_command ansible; then
+    if ! check_command vagrant || ! check_command ansible; then
         log_error "Les outils requis ne sont pas installés"
         echo "Veuillez d'abord installer les outils via le menu principal"
         return 1
     fi
     
-    # TODO: Implémenter la logique de provisionnement local
-    echo "Configuration Vagrant en cours..."
-    echo "Application des playbooks Ansible..."
+    # TODO: Implémenter le provisionnement complet
+    # 1. Créer/copier le Vagrantfile approprié pour Rocky
+    # 2. Initialiser vagrant dans le dossier
+    # 3. Configurer les variables d'environnement
+    # 4. Lancer vagrant up
+    # 5. Appliquer les playbooks Ansible
+    # 6. Vérifier l'état des services
     
-    log_info "Provisionnement local en cours de développement..."
+    # SIMULATION POUR TEST
+    log_info "=== SIMULATION DE PROVISIONNEMENT ==="
+    echo "1. Création du dossier vagrant..."
+    mkdir -p "$ROCKY_PATH/vagrant"
+    sleep 1
+    echo "2. Configuration Vagrantfile Rocky Linux..."
+    sleep 1  
+    echo "   -> Copie des templates Vagrant"
+    echo "3. Initialisation des variables..."
+    sleep 1
+    echo "4. Démarrage des VMs..."
+    echo "   -> vagrant up"
+    sleep 2
+    echo "5. Application des playbooks Ansible..."
+    echo "   -> Configuration système, sécurité, services"
+    sleep 1
+    log_info "=== FIN DE LA SIMULATION ==="
+    
+    log_success "Provisionnement Rocky Linux démarré avec succès !"
+    log_info "Le dossier vagrant a été créé dans: $ROCKY_PATH/vagrant"
+    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+}
+
+launch_ubuntu_provision() {
+    log_info "Lancement du provisionnement Ubuntu..."
+    
+    # Vérifier si le provisionnement existe déjà
+    if [ -d "$UBUNTU_PATH/vagrant" ]; then
+        log_warning "Un provisionnement Ubuntu existe déjà !"
+        log_info "Veuillez d'abord le supprimer avant d'en créer un nouveau."
+        return 1
+    fi
+    
+    # Vérifier les prérequis
+    if ! check_command vagrant || ! check_command ansible; then
+        log_error "Les outils requis ne sont pas installés"
+        echo "Veuillez d'abord installer les outils via le menu principal"
+        return 1
+    fi
+    
+    # TODO: Implémenter le provisionnement complet
+    # 1. Créer/copier le Vagrantfile approprié pour Ubuntu
+    # 2. Initialiser vagrant dans le dossier
+    # 3. Configurer les variables d'environnement
+    # 4. Lancer vagrant up
+    # 5. Appliquer les playbooks Ansible
+    # 6. Vérifier l'état des services
+    
+    # SIMULATION POUR TEST
+    log_info "=== SIMULATION DE PROVISIONNEMENT ==="
+    echo "1. Création du dossier vagrant..."
+    mkdir -p "$UBUNTU_PATH/vagrant"
+    sleep 1
+    echo "2. Configuration Vagrantfile Ubuntu..."
+    sleep 1
+    echo "   -> Copie des templates Vagrant"
+    echo "3. Initialisation des variables..."
+    sleep 1
+    echo "4. Démarrage des VMs..."
+    echo "   -> vagrant up"
+    sleep 2
+    echo "5. Application des playbooks Ansible..."
+    echo "   -> Configuration système, sécurité, services"
+    sleep 1
+    log_info "=== FIN DE LA SIMULATION ==="
+    
+    log_success "Provisionnement Ubuntu démarré avec succès !"
+    log_info "Le dossier vagrant a été créé dans: $UBUNTU_PATH/vagrant"
+    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
 }
 
 launch_cloud_provision() {
@@ -277,13 +474,74 @@ launch_cloud_provision() {
     log_info "Provisionnement cloud en cours de développement..."
 }
 
+
+
+launch_serverRepo_provision() {
+    log_info "Lancement du provisionnement des repositories serveur..."
+    
+    # Vérifier si le provisionnement existe déjà
+    if [ -d "$SERVERREPO_PATH/vagrant" ]; then
+        log_warning "Un provisionnement serverRepo existe déjà !"
+        log_info "Veuillez d'abord le supprimer avant d'en créer un nouveau."
+        return 1
+    fi
+    
+    # Vérifier les prérequis
+    if ! check_command vagrant || ! check_command ansible; then
+        log_error "Les outils requis ne sont pas installés"
+        echo "Veuillez d'abord installer les outils via le menu principal"
+        return 1
+    fi
+    
+    # TODO: Implémenter le provisionnement complet
+    # 1. Créer/copier le Vagrantfile approprié pour serverRepo
+    # 2. Initialiser vagrant dans le dossier
+    # 3. Configurer les variables d'environnement
+    # 4. Lancer vagrant up
+    # 5. Appliquer les playbooks Ansible
+    # 6. Vérifier l'état des services
+    
+    # SIMULATION POUR TEST
+    log_info "=== SIMULATION DE PROVISIONNEMENT serverRepo ==="
+    echo "1. Vérification du dossier existant..."
+    echo "   -> Dossier détecté: $SERVERREPO_PATH/"
+    echo "   -> Dossier vagrant détecté: $SERVERREPO_PATH/vagrant/"
+    sleep 1
+    echo "2. Configuration des services de repositories..."
+    sleep 1
+    echo "   -> Configuration Git server"
+    echo "   -> Configuration Docker registry"
+    echo "   -> Configuration package repositories"
+    echo "3. Initialisation des variables..."
+    sleep 1
+    echo "4. Démarrage des services..."
+    echo "   -> vagrant up"
+    sleep 2
+    echo "5. Application des playbooks Ansible..."
+    echo "   -> Configuration système, sécurité, services"
+    sleep 1
+    log_info "=== FIN DE LA SIMULATION ==="
+    
+    log_success "Provisionnement serverRepo démarré avec succès !"
+    log_info "Utilisation du dossier vagrant existant: $SERVERREPO_PATH/vagrant"
+    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+}
+
+
+
 launch_provision() {
     case "$1" in
-        "Local")
-            launch_local_provision
+        "Rocky_DEV")
+            launch_rocky_provision
+            ;;
+        "Ubuntu_DEV")
+            launch_ubuntu_provision
             ;;
         "Cloud")
             launch_cloud_provision
+            ;;
+        "serverRepo")
+            launch_serverRepo_provision
             ;;
         *)
             log_error "Option de provisionnement non reconnue: $1"
@@ -291,38 +549,134 @@ launch_provision() {
             ;;
     esac
 }
-
 # ==============================
 # FONCTIONS DE SUPPRESSION
 # ==============================
 
-delete_local_provision() {
-    log_info "Suppression du provisionnement local..."
+delete_rocky_provision() {
+    log_info "Suppression du provisionnement Rocky Linux..."
     
-    # TODO: Implémenter la logique de suppression locale
-    echo "Destruction des VMs Vagrant..."
-    echo "Nettoyage des fichiers temporaires..."
+    if [ ! -d "$ROCKY_PATH/vagrant" ]; then
+        log_error "Aucun provisionnement Rocky Linux trouvé à supprimer"
+        return 1
+    fi
     
-    log_info "Suppression locale en cours de développement..."
+    # TODO: Arrêter et détruire les VMs Vagrant
+    echo "Arrêt des VMs Rocky Linux..."
+    # cd "$ROCKY_PATH/vagrant" && vagrant destroy -f
+    
+    # Supprimer le dossier vagrant
+    log_info "Suppression du dossier vagrant..."
+   
+    
+    log_success "Provisionnement Rocky Linux supprimé avec succès !"
+}
+
+delete_ubuntu_provision() {
+    log_info "Suppression du provisionnement Ubuntu..."
+    
+    if [ ! -d "$UBUNTU_PATH/vagrant" ]; then
+        log_error "Aucun provisionnement Ubuntu trouvé à supprimer"
+        return 1
+    fi
+    
+    # TODO: Arrêter et détruire les VMs Vagrant
+    echo "Arrêt des VMs Ubuntu..."
+    # cd "$UBUNTU_PATH/vagrant" && vagrant destroy -f
+    
+    # Supprimer le dossier vagrant
+    log_info "Suppression du dossier vagrant..."
+        
+    log_success "Provisionnement Ubuntu supprimé avec succès !"
 }
 
 delete_cloud_provision() {
     log_info "Suppression du provisionnement cloud..."
     
-    # TODO: Implémenter la logique de suppression cloud
-    echo "Destruction des ressources Terraform..."
-    echo "Nettoyage des états distants..."
+    # TODO: Implémenter la suppression cloud complète
+    # 1. Vérifier l'existence des fichiers Terraform
+    # 2. Lire le state pour voir les ressources créées
+    # 3. Exécuter terraform destroy avec confirmation
+    # 4. Nettoyer les fichiers .tfstate
+    # 5. Supprimer les ressources temporaires
+    # 6. Nettoyer les clés SSH générées
     
-    log_info "Suppression cloud en cours de développement..."
+    # SIMULATION POUR TEST
+    log_info "=== SIMULATION SUPPRESSION CLOUD ==="
+    echo "1. Lecture de l'état Terraform..."
+    sleep 1
+    echo "   -> terraform state list"
+    echo "2. Planification de la destruction..."
+    sleep 1
+    echo "   -> terraform plan -destroy"
+    echo "3. Destruction des ressources cloud..."
+    sleep 2
+    echo "   -> terraform destroy -auto-approve"
+    echo "4. Nettoyage des fichiers d'état..."
+    sleep 1
+    echo "5. Suppression des clés SSH temporaires..."
+    log_info "=== FIN DE LA SIMULATION ==="
+    
+    log_success "Provisionnement cloud supprimé avec succès !"
+    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+}
+
+delete_serverRepo_provision() {
+    log_info "Suppression du provisionnement des repositories serveur..."
+    
+    if [ ! -d "$SERVERREPO_PATH/vagrant" ]; then
+        log_error "Aucun provisionnement serverRepo trouvé à supprimer"
+        return 1
+    fi
+    
+    # TODO: Arrêter et détruire les VMs Vagrant
+    echo "Arrêt des services serverRepo..."
+    # cd "$SERVERREPO_PATH/vagrant" && vagrant destroy -f
+    
+    # SIMULATION POUR TEST
+    log_info "=== SIMULATION SUPPRESSION serverRepo ==="
+    echo "1. Arrêt des services Git/Docker/Registry..."
+    sleep 1
+    echo "   -> Arrêt des conteneurs Docker"
+    echo "   -> Arrêt du serveur Git"
+    echo "   -> Sauvegarde des données critiques"
+    echo "2. Destruction des VMs Vagrant..."
+    sleep 1
+    echo "   -> vagrant destroy -f"
+    echo "3. Nettoyage des fichiers temporaires..."
+    sleep 1
+    echo "4. Vérification de l'arrêt complet..."
+    log_info "=== FIN DE LA SIMULATION ==="
+    
+    log_success "Provisionnement serverRepo supprimé avec succès !"
+    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+    log_info "Le dossier $SERVERREPO_PATH/vagrant est conservé pour une utilisation future"
 }
 
 delete_provision() {
+    # Demander confirmation
+    echo -e "${WARNING}⚠️  ATTENTION: Cette action est irréversible !${NORMAL}"
+    echo -e "${TEXT}Voulez-vous vraiment supprimer le provisionnement $1 ? (y/N)${NORMAL}"
+    read -n 1 confirm
+    echo
+    
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        log_info "Suppression annulée par l'utilisateur"
+        return 0
+    fi
+    
     case "$1" in
-        "Local")
-            delete_local_provision
+        "Rocky_DEV")
+            delete_rocky_provision
+            ;;
+        "Ubuntu_DEV")
+            delete_ubuntu_provision
             ;;
         "Cloud")
             delete_cloud_provision
+            ;;
+        "serverRepo")
+            delete_serverRepo_provision
             ;;
         *)
             log_error "Option de suppression non reconnue: $1"
@@ -330,7 +684,6 @@ delete_provision() {
             ;;
     esac
 }
-
 # ==============================
 # FONCTIONS D'INTERFACE
 # ==============================
@@ -394,6 +747,132 @@ draw_menu() {
     
     draw_border_bottom
     echo -e "\n  ↑ ↓ pour naviguer, Entrée pour valider, q pour quitter"
+}
+
+dynamic_submenu() {
+    local title="$1"
+    local menu_type="$2"  # "provision" ou "delete"
+    
+    # Obtenir les options dynamiquement
+    local options_array
+    if [ "$menu_type" = "provision" ]; then
+        options_array=($(get_available_provision_options))
+    elif [ "$menu_type" = "delete" ]; then
+        options_array=($(get_available_delete_options))
+    elif [ "$title" = "Installer les outils" ]; then
+        options_array=("${INSTALL_OPTIONS[@]}")
+    else
+        log_error "Type de menu non reconnu: $menu_type"
+        return 1
+    fi
+    
+    # Vérifier s'il y a des options disponibles (autres que "Retour")
+    local has_options=false
+    for option in "${options_array[@]}"; do
+        if [ "$option" != "Retour" ] && [ "$option" != "Cloud" ]; then
+            has_options=true
+            break
+        fi
+    done
+    
+    local selected=0
+    
+    while true; do
+        clear
+        
+        # Afficher le statut des provisionnements
+        if [ "$menu_type" = "provision" ] || [ "$menu_type" = "delete" ]; then
+            show_provisioning_status
+        fi
+        
+        draw_border_top
+        draw_title "$title"
+        draw_separator
+        
+        # Afficher un message si aucune option n'est disponible
+        if [ "$has_options" = "false" ] && ([ "$menu_type" = "provision" ] || [ "$menu_type" = "delete" ]); then
+            if [ "$menu_type" = "provision" ]; then
+                draw_option "Aucun provisionnement local disponible" "false"
+                draw_option "(Des provisionnements existent déjà)" "false"
+            else
+                draw_option "Aucun provisionnement à supprimer" "false"
+            fi
+            draw_separator
+        fi
+        
+        for i in "${!options_array[@]}"; do
+            local is_selected="false"
+            [ $i -eq $selected ] && is_selected="true"
+            draw_option "${options_array[$i]}" "$is_selected"
+        done
+        
+        draw_border_bottom
+        echo -e "\n  ↑ ↓ pour naviguer, Entrée pour valider, q pour revenir"
+        
+        # Lecture des touches
+        read -rsn1 key
+        case "$key" in
+            $'\x1b')
+                read -rsn2 key2
+                case "$key2" in
+                    "[A") ((selected--)); [ $selected -lt 0 ] && selected=$((${#options_array[@]}-1)) ;;
+                    "[B") ((selected++)); [ $selected -ge ${#options_array[@]} ] && selected=0 ;;
+                esac
+                ;;
+            "")
+                if [ "${options_array[$selected]}" == "Retour" ]; then
+                    return 0
+                fi
+                
+                # Ignorer les options non-fonctionnelles
+                if [ "${options_array[$selected]}" == "Aucun provisionnement local disponible" ] || \
+                   [ "${options_array[$selected]}" == "(Des provisionnements existent déjà)" ] || \
+                   [ "${options_array[$selected]}" == "Aucun provisionnement à supprimer" ]; then
+                    continue
+                fi
+                
+                clear
+                echo -e "${TITLE}>>> ${title} : ${options_array[$selected]}${NORMAL}\n"
+                
+                # Exécuter l'action appropriée
+                case "$title" in
+                    "Installer les outils")
+                        install_tools "${options_array[$selected]}"
+                        ;;
+                    "Provisionnement")
+                        launch_provision "${options_array[$selected]}"
+                        ;;
+                    "Supprimer un provisionnement")
+                        delete_provision "${options_array[$selected]}"
+                        ;;
+                esac
+                
+                wait_for_key
+                
+                # Recalculer les options après l'action
+                if [ "$menu_type" = "provision" ]; then
+                    options_array=($(get_available_provision_options))
+                elif [ "$menu_type" = "delete" ]; then
+                    options_array=($(get_available_delete_options))
+                fi
+                
+                # Vérifier à nouveau s'il y a des options
+                has_options=false
+                for option in "${options_array[@]}"; do
+                    if [ "$option" != "Retour" ] && [ "$option" != "Cloud" ]; then
+                        has_options=true
+                        break
+                    fi
+                done
+                
+                # Réinitialiser la sélection
+                selected=0
+                ;;
+            q)
+                return 0
+                ;;
+        esac
+    done
 }
 
 submenu() {
@@ -462,19 +941,29 @@ show_help() {
     clear
     echo -e "${TITLE}=== AIDE ===${NORMAL}\n"
     echo -e "${TEXT}Ce script permet de gérer facilement le provisionnement d'environnements.${NORMAL}\n"
+    
+    # Afficher le statut actuel
+    show_provisioning_status
+    
     echo -e "${TEXT}Options disponibles :${NORMAL}"
     echo -e "1. ${HIGHLIGHT}Installer les outils${NORMAL} - Installe Terraform, Ansible et Vagrant"
     echo -e "   selon votre système d'exploitation"
     echo -e "2. ${HIGHLIGHT}Lancer un provisionnement${NORMAL} - Déploie un environnement"
-    echo -e "   local (Vagrant) ou cloud (Terraform)"
+    echo -e "   local (Rocky/Ubuntu) ou cloud (Terraform)"
+    echo -e "   ${TEXT}Note: Seuls les provisionnements non-existants sont proposés${NORMAL}"
     echo -e "3. ${HIGHLIGHT}Supprimer un provisionnement${NORMAL} - Détruit un environnement"
     echo -e "   existant pour libérer les ressources"
+    echo -e "   ${TEXT}Note: Seuls les provisionnements existants sont proposés${NORMAL}"
     echo -e "4. ${HIGHLIGHT}Aide${NORMAL} - Affiche cette aide"
     echo -e "5. ${HIGHLIGHT}Quitter${NORMAL} - Ferme le programme"
     echo -e "\n${TEXT}Navigation :${NORMAL}"
     echo -e "- Utilisez les flèches ↑ ↓ pour naviguer"
     echo -e "- Appuyez sur Entrée pour valider"
     echo -e "- Appuyez sur 'q' pour revenir ou quitter"
+    echo -e "\n${TEXT}Détection automatique :${NORMAL}"
+    echo -e "- Le script détecte automatiquement les dossiers 'vagrant' existants"
+    echo -e "- Rocky Linux: ${ROCKY_PATH}/vagrant"
+    echo -e "- Ubuntu: ${UBUNTU_PATH}/vagrant"
     wait_for_key
 }
 
@@ -504,13 +993,13 @@ main() {
             "")
                 case "${MAIN_OPTIONS[$selected_main]}" in
                     "Installer les outils")
-                        submenu "Installer les outils" "${INSTALL_OPTIONS[@]}"
+                        dynamic_submenu "Installer les outils" "install"
                         ;;
                     "Lancer un provisionnement")
-                        submenu "Provisionnement" "${PROVISION_OPTIONS[@]}"
+                        dynamic_submenu "Provisionnement" "provision"
                         ;;
                     "Supprimer un provisionnement")
-                        submenu "Supprimer un provisionnement" "${PROVISION_OPTIONS[@]}"
+                        dynamic_submenu "Supprimer un provisionnement" "delete"
                         ;;
                     "Aide")
                         show_help
