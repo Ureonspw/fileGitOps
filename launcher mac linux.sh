@@ -31,7 +31,7 @@ readonly UBUNTU_PATH="testGitOps Ubuntu"
 readonly SERVERREPO_PATH="serveur_DOCKGIT"
 
 # Options des menus
-readonly MAIN_OPTIONS=("Installer les outils" "Lancer un provisionnement" "Aide" "Supprimer un provisionnement" "Quitter")
+readonly MAIN_OPTIONS=("Installer les outils" "Lancer un provisionnement" "Aide" "Supprimer un provisionnement" "Quitter" "mise sous tension" "mise hors tension" "connexion")
 readonly INSTALL_OPTIONS=("Mac (brew)" "Mac (sans brew)" "Linux Ubuntu" "Linux CentOS" "Retour")
 
 # Variables globales
@@ -46,20 +46,20 @@ check_provisioning_status() {
     local ubuntu_exists=false
     local serverrepo_exists=false
     
-    # Vérifier l'existence des dossiers vagrant
-    if [ -d "$ROCKY_PATH/vagrant" ]; then
+    # Vérifier l'existence des dossiers vagrant ET la présence d'un Vagrantfile
+    if [ -d "$ROCKY_PATH/vagrant" ] && [ -f "$ROCKY_PATH/vagrant/Vagrantfile" ]; then
         rocky_exists=true
     fi
     
-    if [ -d "$UBUNTU_PATH/vagrant" ]; then
+    if [ -d "$UBUNTU_PATH/vagrant" ] && [ -f "$UBUNTU_PATH/vagrant/Vagrantfile" ]; then
         ubuntu_exists=true
     fi
     
-    if [ -d "$SERVERREPO_PATH/vagrant" ]; then
+    if [ -d "$SERVERREPO_PATH/vagrant" ] && [ -f "$SERVERREPO_PATH/vagrant/Vagrantfile" ]; then
         serverrepo_exists=true
     fi
     
-    # CORRECTION: Retourner les 3 valeurs séparées par :
+    # Retourner les 3 valeurs séparées par :
     echo "$rocky_exists:$ubuntu_exists:$serverrepo_exists"
 }
 
@@ -89,7 +89,40 @@ get_available_provision_options() {
     
     echo "${options[@]}"
 }
-
+get_available_ssh_options() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    local options=()
+    
+    # Ne proposer que les serveurs déjà provisionnés et en cours d'exécution
+    if [ "$rocky_exists" = "true" ]; then
+        local rocky_status=$(check_server_status "$ROCKY_PATH")
+        if [ "$rocky_status" = "running" ]; then
+            options+=("Rocky_DEV")
+        fi
+    fi
+    
+    if [ "$ubuntu_exists" = "true" ]; then
+        local ubuntu_status=$(check_server_status "$UBUNTU_PATH")
+        if [ "$ubuntu_status" = "running" ]; then
+            options+=("Ubuntu_DEV")
+        fi
+    fi
+    
+    if [ "$serverrepo_exists" = "true" ]; then
+        local serverrepo_status=$(check_server_status "$SERVERREPO_PATH")
+        if [ "$serverrepo_status" = "running" ]; then
+            options+=("serverRepo")
+        fi
+    fi
+    
+    options+=("Retour")
+    
+    echo "${options[@]}"
+}
 
 get_available_delete_options() {
     local status=$(check_provisioning_status)
@@ -116,7 +149,66 @@ get_available_delete_options() {
     
     echo "${options[@]}"
 }
+get_available_shserver_options() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    local options=()
+    
+    # Ne proposer que les serveurs déjà provisionnés
+    if [ "$rocky_exists" = "true" ]; then
+        options+=("Rocky_DEV")
+    fi
+    
+    if [ "$ubuntu_exists" = "true" ]; then
+        options+=("Ubuntu_DEV")
+    fi
+    
+    if [ "$serverrepo_exists" = "true" ]; then
+        options+=("serverRepo")
+    fi
+    
+    options+=("Retour")
+    
+    echo "${options[@]}"
+}
 
+get_available_shutdown_options() {
+    local status=$(check_provisioning_status)
+    local rocky_exists=$(echo "$status" | cut -d: -f1)
+    local ubuntu_exists=$(echo "$status" | cut -d: -f2)
+    local serverrepo_exists=$(echo "$status" | cut -d: -f3)
+    
+    local options=()
+    
+    # Ne proposer que les serveurs déjà provisionnés et en cours d'exécution
+    if [ "$rocky_exists" = "true" ]; then
+        local rocky_status=$(check_server_status "$ROCKY_PATH")
+        if [ "$rocky_status" = "running" ]; then
+            options+=("Rocky_DEV")
+        fi
+    fi
+    
+    if [ "$ubuntu_exists" = "true" ]; then
+        local ubuntu_status=$(check_server_status "$UBUNTU_PATH")
+        if [ "$ubuntu_status" = "running" ]; then
+            options+=("Ubuntu_DEV")
+        fi
+    fi
+    
+    if [ "$serverrepo_exists" = "true" ]; then
+        local serverrepo_status=$(check_server_status "$SERVERREPO_PATH")
+        if [ "$serverrepo_status" = "running" ]; then
+            options+=("serverRepo")
+        fi
+    fi
+    
+    options+=("Retour")
+    
+    echo "${options[@]}"
+}
 
 show_provisioning_status() {
     local status=$(check_provisioning_status)
@@ -387,27 +479,34 @@ launch_rocky_provision() {
     # 5. Appliquer les playbooks Ansible
     # 6. Vérifier l'état des services
     
-    # SIMULATION POUR TEST
-    log_info "=== SIMULATION DE PROVISIONNEMENT ==="
-    echo "1. Création du dossier vagrant..."
+    # Créer le dossier vagrant
+    log_info "Création du dossier vagrant..."
     mkdir -p "$ROCKY_PATH/vagrant"
-    sleep 1
-    echo "2. Configuration Vagrantfile Rocky Linux..."
-    sleep 1  
-    echo "   -> Copie des templates Vagrant"
-    echo "3. Initialisation des variables..."
-    sleep 1
-    echo "4. Démarrage des VMs..."
-    echo "   -> vagrant up"
-    sleep 2
-    echo "5. Application des playbooks Ansible..."
-    echo "   -> Configuration système, sécurité, services"
-    sleep 1
-    log_info "=== FIN DE LA SIMULATION ==="
     
-    log_success "Provisionnement Rocky Linux démarré avec succès !"
+    # Créer un Vagrantfile basique pour Rocky Linux
+    log_info "Configuration Vagrantfile Rocky Linux..."
+    cat > "$ROCKY_PATH/vagrant/Vagrantfile" << 'EOF'
+Vagrant.configure("2") do |config|
+  config.vm.box = "rockylinux/9"
+  config.vm.hostname = "rocky-dev"
+  
+  config.vm.network "private_network", ip: "192.168.56.10"
+  
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+  
+  config.vm.provision "shell", inline: <<-SHELL
+    dnf update -y
+    dnf install -y git vim curl wget
+  SHELL
+end
+EOF
+    
+    log_success "Provisionnement Rocky Linux configuré avec succès !"
     log_info "Le dossier vagrant a été créé dans: $ROCKY_PATH/vagrant"
-    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+    log_info "Vous pouvez maintenant démarrer le serveur avec 'mise sous tension'"
 }
 
 launch_ubuntu_provision() {
@@ -435,27 +534,34 @@ launch_ubuntu_provision() {
     # 5. Appliquer les playbooks Ansible
     # 6. Vérifier l'état des services
     
-    # SIMULATION POUR TEST
-    log_info "=== SIMULATION DE PROVISIONNEMENT ==="
-    echo "1. Création du dossier vagrant..."
+    # Créer le dossier vagrant
+    log_info "Création du dossier vagrant..."
     mkdir -p "$UBUNTU_PATH/vagrant"
-    sleep 1
-    echo "2. Configuration Vagrantfile Ubuntu..."
-    sleep 1
-    echo "   -> Copie des templates Vagrant"
-    echo "3. Initialisation des variables..."
-    sleep 1
-    echo "4. Démarrage des VMs..."
-    echo "   -> vagrant up"
-    sleep 2
-    echo "5. Application des playbooks Ansible..."
-    echo "   -> Configuration système, sécurité, services"
-    sleep 1
-    log_info "=== FIN DE LA SIMULATION ==="
     
-    log_success "Provisionnement Ubuntu démarré avec succès !"
+    # Créer un Vagrantfile basique pour Ubuntu
+    log_info "Configuration Vagrantfile Ubuntu..."
+    cat > "$UBUNTU_PATH/vagrant/Vagrantfile" << 'EOF'
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.hostname = "ubuntu-dev"
+  
+  config.vm.network "private_network", ip: "192.168.56.11"
+  
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+  
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get install -y git vim curl wget
+  SHELL
+end
+EOF
+    
+    log_success "Provisionnement Ubuntu configuré avec succès !"
     log_info "Le dossier vagrant a été créé dans: $UBUNTU_PATH/vagrant"
-    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+    log_info "Vous pouvez maintenant démarrer le serveur avec 'mise sous tension'"
 }
 
 launch_cloud_provision() {
@@ -561,15 +667,22 @@ delete_rocky_provision() {
         return 1
     fi
     
-    # TODO: Arrêter et détruire les VMs Vagrant
-    echo "Arrêt des VMs Rocky Linux..."
-    # cd "$ROCKY_PATH/vagrant" && vagrant destroy -f
+    # Arrêter et détruire les VMs Vagrant si elles existent
+    if [ -f "$ROCKY_PATH/vagrant/Vagrantfile" ]; then
+        log_info "Arrêt et destruction des VMs Rocky Linux..."
+        cd "$ROCKY_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+    fi
     
     # Supprimer le dossier vagrant
     log_info "Suppression du dossier vagrant..."
-   
+    rm -rf "$ROCKY_PATH/vagrant"
     
-    log_success "Provisionnement Rocky Linux supprimé avec succès !"
+    if [ $? -eq 0 ]; then
+        log_success "Provisionnement Rocky Linux supprimé avec succès !"
+    else
+        log_error "Erreur lors de la suppression du dossier vagrant"
+        return 1
+    fi
 }
 
 delete_ubuntu_provision() {
@@ -580,14 +693,22 @@ delete_ubuntu_provision() {
         return 1
     fi
     
-    # TODO: Arrêter et détruire les VMs Vagrant
-    echo "Arrêt des VMs Ubuntu..."
-    # cd "$UBUNTU_PATH/vagrant" && vagrant destroy -f
+    # Arrêter et détruire les VMs Vagrant si elles existent
+    if [ -f "$UBUNTU_PATH/vagrant/Vagrantfile" ]; then
+        log_info "Arrêt et destruction des VMs Ubuntu..."
+        cd "$UBUNTU_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+    fi
     
     # Supprimer le dossier vagrant
     log_info "Suppression du dossier vagrant..."
-        
-    log_success "Provisionnement Ubuntu supprimé avec succès !"
+    rm -rf "$UBUNTU_PATH/vagrant"
+    
+    if [ $? -eq 0 ]; then
+        log_success "Provisionnement Ubuntu supprimé avec succès !"
+    else
+        log_error "Erreur lors de la suppression du dossier vagrant"
+        return 1
+    fi
 }
 
 delete_cloud_provision() {
@@ -629,28 +750,22 @@ delete_serverRepo_provision() {
         return 1
     fi
     
-    # TODO: Arrêter et détruire les VMs Vagrant
-    echo "Arrêt des services serverRepo..."
-    # cd "$SERVERREPO_PATH/vagrant" && vagrant destroy -f
+    # Arrêter et détruire les VMs Vagrant si elles existent
+    if [ -f "$SERVERREPO_PATH/vagrant/Vagrantfile" ]; then
+        log_info "Arrêt et destruction des VMs serverRepo..."
+        cd "$SERVERREPO_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+    fi
     
-    # SIMULATION POUR TEST
-    log_info "=== SIMULATION SUPPRESSION serverRepo ==="
-    echo "1. Arrêt des services Git/Docker/Registry..."
-    sleep 1
-    echo "   -> Arrêt des conteneurs Docker"
-    echo "   -> Arrêt du serveur Git"
-    echo "   -> Sauvegarde des données critiques"
-    echo "2. Destruction des VMs Vagrant..."
-    sleep 1
-    echo "   -> vagrant destroy -f"
-    echo "3. Nettoyage des fichiers temporaires..."
-    sleep 1
-    echo "4. Vérification de l'arrêt complet..."
-    log_info "=== FIN DE LA SIMULATION ==="
+    # Supprimer le dossier vagrant
+    log_info "Suppression du dossier vagrant..."
+    rm -rf "$SERVERREPO_PATH/vagrant"
     
-    log_success "Provisionnement serverRepo supprimé avec succès !"
-    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
-    log_info "Le dossier $SERVERREPO_PATH/vagrant est conservé pour une utilisation future"
+    if [ $? -eq 0 ]; then
+        log_success "Provisionnement serverRepo supprimé avec succès !"
+    else
+        log_error "Erreur lors de la suppression du dossier vagrant"
+        return 1
+    fi
 }
 
 delete_provision() {
@@ -684,6 +799,310 @@ delete_provision() {
             ;;
     esac
 }
+
+
+
+
+check_server_status() {
+    local server_path="$1"
+    
+    # Vérifier que le dossier vagrant existe ET qu'il contient un Vagrantfile
+    if [ -d "$server_path/vagrant" ] && [ -f "$server_path/vagrant/Vagrantfile" ]; then
+        # Vérifier que vagrant est disponible
+        if ! command -v vagrant &> /dev/null; then
+            echo "not_provisioned"
+            return
+        fi
+        
+        # Aller dans le dossier vagrant et vérifier le statut
+        cd "$server_path/vagrant" 2>/dev/null || {
+            echo "not_provisioned"
+            return
+        }
+        
+        # Vérifier le statut vagrant avec une approche plus robuste
+        local vagrant_status_output=$(vagrant status 2>/dev/null)
+        
+        if echo "$vagrant_status_output" | grep -q "running"; then
+            echo "running"
+        elif echo "$vagrant_status_output" | grep -qE "(poweroff|saved|aborted|not created)"; then
+            echo "stopped"
+        else
+            # Si on ne peut pas déterminer le statut, mais que le Vagrantfile existe,
+            # on considère que c'est provisionné mais arrêté
+            echo "stopped"
+        fi
+    else
+        echo "not_provisioned"
+    fi
+}
+
+shupserver() {
+    local server_name="$1"
+    local server_path=""
+    
+    # Déterminer le chemin du serveur
+    case "$server_name" in
+        "Rocky_DEV")
+            server_path="$ROCKY_PATH"
+            ;;
+        "Ubuntu_DEV")
+            server_path="$UBUNTU_PATH"
+            ;;
+        "serverRepo")
+            server_path="$SERVERREPO_PATH"
+            ;;
+        *)
+            log_error "Option non reconnue: $server_name"
+            return 1
+            ;;
+    esac
+    
+    # Vérifier que le dossier vagrant existe
+    if [ ! -d "$server_path/vagrant" ]; then
+        log_error "Le provisionnement $server_name n'existe pas !"
+        log_info "Veuillez d'abord créer un provisionnement via le menu principal"
+        return 1
+    fi
+    
+    # Vérifier l'état actuel du serveur
+    local current_status=$(check_server_status "$server_path")
+    
+    if [ "$current_status" = "running" ]; then
+        log_warning "Le serveur $server_name est déjà en cours d'exécution !"
+        echo -e "${TEXT}Voulez-vous le redémarrer ? (y/N)${NORMAL}"
+        read -n 1 restart_confirm
+        echo
+        
+        if [ "$restart_confirm" = "y" ] || [ "$restart_confirm" = "Y" ]; then
+            log_info "Arrêt du serveur $server_name..."
+            cd "$server_path/vagrant" && vagrant halt
+            if [ $? -ne 0 ]; then
+                log_error "Échec de l'arrêt du serveur $server_name"
+                return 1
+            fi
+            sleep 2
+        else
+            log_info "Démarrage annulé"
+            return 0
+        fi
+    fi
+    
+    # Démarrer le serveur
+    log_info "Démarrage du serveur $server_name..."
+    cd "$server_path/vagrant" || {
+        log_error "Impossible d'accéder au dossier $server_path/vagrant"
+        return 1
+    }
+    
+    # Vérifier que Vagrant est disponible
+    if ! command -v vagrant &> /dev/null; then
+        log_error "Vagrant n'est pas installé ou pas dans le PATH"
+        return 1
+    fi
+    
+    # Lancer vagrant up
+    vagrant up
+    local vagrant_exit_code=$?
+    
+    if [ $vagrant_exit_code -eq 0 ]; then
+        log_success "Serveur $server_name démarré avec succès !"
+        
+        # Afficher les informations de connexion
+        echo -e "\n${TITLE}=== INFORMATIONS DE CONNEXION ===${NORMAL}"
+        vagrant ssh-config
+        
+        # Afficher l'adresse IP si disponible
+        local ip_info=$(vagrant ssh -c "ip addr show | grep 'inet ' | grep -v '127.0.0.1' | head -1" 2>/dev/null)
+        if [ -n "$ip_info" ]; then
+            echo -e "\n${SUCCESS}Adresse IP du serveur:${NORMAL}"
+            echo "$ip_info"
+        fi
+    else
+        log_error "Échec du démarrage du serveur $server_name"
+        log_info "Vérifiez les logs avec: cd $server_path/vagrant && vagrant status"
+        return 1
+    fi
+}
+
+# ==============================
+# FONCTIONS DE MISE HORS TENSION
+# ==============================
+
+shutdown_server() {
+    local server_name="$1"
+    local server_path=""
+    
+    # Déterminer le chemin du serveur
+    case "$server_name" in
+        "Rocky_DEV")
+            server_path="$ROCKY_PATH"
+            ;;
+        "Ubuntu_DEV")
+            server_path="$UBUNTU_PATH"
+            ;;
+        "serverRepo")
+            server_path="$SERVERREPO_PATH"
+            ;;
+        *)
+            log_error "Option non reconnue: $server_name"
+            return 1
+            ;;
+    esac
+    
+    # Vérifier que le dossier vagrant existe
+    if [ ! -d "$server_path/vagrant" ]; then
+        log_error "Le provisionnement $server_name n'existe pas !"
+        log_info "Veuillez d'abord créer un provisionnement via le menu principal"
+        return 1
+    fi
+    
+    # Vérifier l'état actuel du serveur
+    local current_status=$(check_server_status "$server_path")
+    
+    if [ "$current_status" = "not_provisioned" ]; then
+        log_error "Le serveur $server_name n'est pas provisionné !"
+        return 1
+    elif [ "$current_status" = "stopped" ]; then
+        log_warning "Le serveur $server_name est déjà arrêté !"
+        return 0
+    fi
+    
+    # Demander confirmation avant l'arrêt
+    echo -e "${WARNING}⚠️  ATTENTION: Vous allez arrêter le serveur $server_name !${NORMAL}"
+    echo -e "${TEXT}Voulez-vous vraiment arrêter le serveur ? (y/N)${NORMAL}"
+    read -n 1 confirm
+    echo
+    
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        log_info "Arrêt annulé par l'utilisateur"
+        return 0
+    fi
+    
+    # Arrêter le serveur
+    log_info "Arrêt du serveur $server_name..."
+    cd "$server_path/vagrant" || {
+        log_error "Impossible d'accéder au dossier $server_path/vagrant"
+        return 1
+    }
+    
+    # Vérifier que Vagrant est disponible
+    if ! command -v vagrant &> /dev/null; then
+        log_error "Vagrant n'est pas installé ou pas dans le PATH"
+        return 1
+    fi
+    
+    # Lancer vagrant halt
+    vagrant halt
+    local vagrant_exit_code=$?
+    
+    if [ $vagrant_exit_code -eq 0 ]; then
+        log_success "Serveur $server_name arrêté avec succès !"
+        
+        # Vérifier l'état final
+        local final_status=$(check_server_status "$server_path")
+        if [ "$final_status" = "stopped" ]; then
+            log_success "État confirmé : Serveur $server_name arrêté"
+        elif [ "$final_status" = "not_provisioned" ]; then
+            log_warning "Attention : Le provisionnement semble avoir été supprimé"
+        else
+            log_info "État actuel : $final_status"
+        fi
+    else
+        log_error "Échec de l'arrêt du serveur $server_name"
+        log_info "Vérifiez les logs avec: cd $server_path/vagrant && vagrant status"
+        return 1
+    fi
+}
+
+# ==============================
+# FONCTIONS DE CONNEXION SSH
+# ==============================
+
+connect_ssh() {
+    local server_name="$1"
+    local server_path=""
+    
+    # Déterminer le chemin du serveur
+    case "$server_name" in
+        "Rocky_DEV")
+            server_path="$ROCKY_PATH"
+            ;;
+        "Ubuntu_DEV")
+            server_path="$UBUNTU_PATH"
+            ;;
+        "serverRepo")
+            server_path="$SERVERREPO_PATH"
+            ;;
+        *)
+            log_error "Option non reconnue: $server_name"
+            return 1
+            ;;
+    esac
+    
+    # Vérifier que le dossier vagrant existe
+    if [ ! -d "$server_path/vagrant" ]; then
+        log_error "Le provisionnement $server_name n'existe pas !"
+        log_info "Veuillez d'abord créer un provisionnement via le menu principal"
+        return 1
+    fi
+    
+    # Vérifier l'état du serveur
+    local current_status=$(check_server_status "$server_path")
+    
+    if [ "$current_status" = "not_provisioned" ]; then
+        log_error "Le serveur $server_name n'est pas provisionné !"
+        return 1
+    elif [ "$current_status" = "stopped" ]; then
+        log_warning "Le serveur $server_name est arrêté !"
+        echo -e "${TEXT}Voulez-vous le démarrer maintenant ? (y/N)${NORMAL}"
+        read -n 1 start_confirm
+        echo
+        
+        if [ "$start_confirm" = "y" ] || [ "$start_confirm" = "Y" ]; then
+            log_info "Démarrage du serveur $server_name..."
+            shupserver "$server_name"
+            if [ $? -ne 0 ]; then
+                log_error "Impossible de démarrer le serveur $server_name"
+                return 1
+            fi
+        else
+            log_info "Connexion annulée"
+            return 0
+        fi
+    fi
+    
+    # Se connecter au serveur
+    log_info "Connexion au serveur $server_name..."
+    cd "$server_path/vagrant" || {
+        log_error "Impossible d'accéder au dossier $server_path/vagrant"
+        return 1
+    }
+    
+    # Vérifier que Vagrant est disponible
+    if ! command -v vagrant &> /dev/null; then
+        log_error "Vagrant n'est pas installé ou pas dans le PATH"
+        return 1
+    fi
+    
+    # Afficher les informations de connexion avant de se connecter
+    echo -e "\n${TITLE}=== INFORMATIONS DE CONNEXION ===${NORMAL}"
+    vagrant ssh-config
+    
+    echo -e "\n${SUCCESS}Connexion au serveur $server_name...${NORMAL}"
+    echo -e "${TEXT}Pour quitter la session SSH, tapez 'exit'${NORMAL}\n"
+    
+    # Se connecter via SSH
+    vagrant ssh
+    local ssh_exit_code=$?
+    
+    if [ $ssh_exit_code -eq 0 ]; then
+        log_success "Déconnexion du serveur $server_name réussie"
+    else
+        log_warning "Session SSH terminée avec le code: $ssh_exit_code"
+    fi
+}
+
 # ==============================
 # FONCTIONS D'INTERFACE
 # ==============================
@@ -761,6 +1180,12 @@ dynamic_submenu() {
         options_array=($(get_available_delete_options))
     elif [ "$title" = "Installer les outils" ]; then
         options_array=("${INSTALL_OPTIONS[@]}")
+    elif [ "$menu_type" = "shserver" ]; then
+        options_array=($(get_available_shserver_options))
+    elif [ "$menu_type" = "ssh" ]; then
+        options_array=($(get_available_ssh_options))
+    elif [ "$menu_type" = "shutdown" ]; then
+        options_array=($(get_available_shutdown_options))
     else
         log_error "Type de menu non reconnu: $menu_type"
         return 1
@@ -790,12 +1215,18 @@ dynamic_submenu() {
         draw_separator
         
         # Afficher un message si aucune option n'est disponible
-        if [ "$has_options" = "false" ] && ([ "$menu_type" = "provision" ] || [ "$menu_type" = "delete" ]); then
+        if [ "$has_options" = "false" ] && ([ "$menu_type" = "provision" ] || [ "$menu_type" = "delete" ] || [ "$menu_type" = "shutdown" ] || [ "$menu_type" = "ssh" ]); then
             if [ "$menu_type" = "provision" ]; then
                 draw_option "Aucun provisionnement local disponible" "false"
                 draw_option "(Des provisionnements existent déjà)" "false"
-            else
+            elif [ "$menu_type" = "delete" ]; then
                 draw_option "Aucun provisionnement à supprimer" "false"
+            elif [ "$menu_type" = "shutdown" ]; then
+                draw_option "Aucun serveur en cours d'exécution" "false"
+                draw_option "(Aucun serveur à arrêter)" "false"
+            elif [ "$menu_type" = "ssh" ]; then
+                draw_option "Aucun serveur en cours d'exécution" "false"
+                draw_option "(Aucun serveur pour la connexion)" "false"
             fi
             draw_separator
         fi
@@ -827,7 +1258,10 @@ dynamic_submenu() {
                 # Ignorer les options non-fonctionnelles
                 if [ "${options_array[$selected]}" == "Aucun provisionnement local disponible" ] || \
                    [ "${options_array[$selected]}" == "(Des provisionnements existent déjà)" ] || \
-                   [ "${options_array[$selected]}" == "Aucun provisionnement à supprimer" ]; then
+                   [ "${options_array[$selected]}" == "Aucun provisionnement à supprimer" ] || \
+                   [ "${options_array[$selected]}" == "Aucun serveur en cours d'exécution" ] || \
+                   [ "${options_array[$selected]}" == "(Aucun serveur à arrêter)" ] || \
+                   [ "${options_array[$selected]}" == "(Aucun serveur pour la connexion)" ]; then
                     continue
                 fi
                 
@@ -845,6 +1279,15 @@ dynamic_submenu() {
                     "Supprimer un provisionnement")
                         delete_provision "${options_array[$selected]}"
                         ;;
+                    "Mise sous tension des serveurs")
+                        shupserver "${options_array[$selected]}"
+                        ;;
+                    "Connexion a un serveur")
+                        connect_ssh "${options_array[$selected]}"
+                        ;;
+                    "Mise hors tension des serveurs")
+                        shutdown_server "${options_array[$selected]}"
+                        ;;
                 esac
                 
                 wait_for_key
@@ -854,6 +1297,12 @@ dynamic_submenu() {
                     options_array=($(get_available_provision_options))
                 elif [ "$menu_type" = "delete" ]; then
                     options_array=($(get_available_delete_options))
+                elif [ "$menu_type" = "shutdown" ]; then
+                    options_array=($(get_available_shutdown_options))
+                elif [ "$menu_type" = "ssh" ]; then
+                    options_array=($(get_available_ssh_options))
+                elif [ "$menu_type" = "shserver" ]; then
+                    options_array=($(get_available_shserver_options))
                 fi
                 
                 # Vérifier à nouveau s'il y a des options
@@ -926,6 +1375,15 @@ submenu() {
                     "Supprimer un provisionnement")
                         delete_provision "${options[$selected]}"
                         ;;
+                    "Mise sous tension des serveurs")
+                        shupserver "${options[$selected]}"
+                        ;;
+                    "Connexion a un serveur")
+                        connect_ssh "${options[$selected]}"
+                        ;;
+                    "Mise hors tension des serveurs")
+                        shutdown_server "${options[$selected]}"
+                        ;;
                 esac
                 
                 wait_for_key
@@ -954,8 +1412,14 @@ show_help() {
     echo -e "3. ${HIGHLIGHT}Supprimer un provisionnement${NORMAL} - Détruit un environnement"
     echo -e "   existant pour libérer les ressources"
     echo -e "   ${TEXT}Note: Seuls les provisionnements existants sont proposés${NORMAL}"
-    echo -e "4. ${HIGHLIGHT}Aide${NORMAL} - Affiche cette aide"
-    echo -e "5. ${HIGHLIGHT}Quitter${NORMAL} - Ferme le programme"
+    echo -e "4. ${HIGHLIGHT}Mise sous tension${NORMAL} - Démarre un serveur provisionné"
+    echo -e "   ${TEXT}Note: Seuls les serveurs provisionnés sont proposés${NORMAL}"
+    echo -e "5. ${HIGHLIGHT}Mise hors tension${NORMAL} - Arrête un serveur en cours d'exécution"
+    echo -e "   ${TEXT}Note: Seuls les serveurs en cours d'exécution sont proposés${NORMAL}"
+    echo -e "6. ${HIGHLIGHT}Connexion${NORMAL} - Se connecte en SSH à un serveur"
+    echo -e "   ${TEXT}Note: Seuls les serveurs en cours d'exécution sont proposés${NORMAL}"
+    echo -e "7. ${HIGHLIGHT}Aide${NORMAL} - Affiche cette aide"
+    echo -e "8. ${HIGHLIGHT}Quitter${NORMAL} - Ferme le programme"
     echo -e "\n${TEXT}Navigation :${NORMAL}"
     echo -e "- Utilisez les flèches ↑ ↓ pour naviguer"
     echo -e "- Appuyez sur Entrée pour valider"
@@ -1008,6 +1472,15 @@ main() {
                         clear
                         echo -e "${SUCCESS}Au revoir ! 👋${NORMAL}"
                         exit 0
+                        ;;
+                    "mise sous tension")
+                        dynamic_submenu "Mise sous tension des serveurs" "shserver"
+                        ;;
+                    "mise hors tension")
+                        dynamic_submenu "Mise hors tension des serveurs" "shutdown"
+                        ;;
+                    "connexion")
+                        dynamic_submenu "Connexion a un serveur" "ssh"
                         ;;
                 esac
                 ;;
