@@ -8,6 +8,14 @@
 set -e  # Arrêter en cas d'erreur
 
 # ==============================
+# CONFIGURATION DU RÉPERTOIRE DE TRAVAIL
+# ==============================
+
+# S'assurer qu'on est dans le répertoire du script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# ==============================
 # CONFIGURATION ET CONSTANTES
 # ==============================
 
@@ -31,7 +39,7 @@ readonly UBUNTU_PATH="testGitOps Ubuntu"
 readonly SERVERREPO_PATH="serveur_DOCKGIT"
 
 # Options des menus
-readonly MAIN_OPTIONS=("Installer les outils" "Lancer un provisionnement" "Aide" "Supprimer un provisionnement" "Quitter" "mise sous tension" "mise hors tension" "connexion")
+readonly MAIN_OPTIONS=("Installer les outils" "Lancer un provisionnement" "Aide" "Supprimer un provisionnement" "mise sous tension" "mise hors tension" "connexion" "Quitter" )
 readonly INSTALL_OPTIONS=("Mac (brew)" "Mac (sans brew)" "Linux Ubuntu" "Linux CentOS" "Retour")
 
 # Variables globales
@@ -480,33 +488,16 @@ launch_rocky_provision() {
     # 6. Vérifier l'état des services
     
     # Créer le dossier vagrant
-    log_info "Création du dossier vagrant..."
-    mkdir -p "$ROCKY_PATH/vagrant"
+   
+    cd "$ROCKY_PATH/terraform"
+    terraform init
+    terraform plan
+    terraform apply
     
-    # Créer un Vagrantfile basique pour Rocky Linux
-    log_info "Configuration Vagrantfile Rocky Linux..."
-    cat > "$ROCKY_PATH/vagrant/Vagrantfile" << 'EOF'
-Vagrant.configure("2") do |config|
-  config.vm.box = "rockylinux/9"
-  config.vm.hostname = "rocky-dev"
-  
-  config.vm.network "private_network", ip: "192.168.56.10"
-  
-  config.vm.provider "virtualbox" do |vb|
-    vb.memory = "2048"
-    vb.cpus = 2
-  end
-  
-  config.vm.provision "shell", inline: <<-SHELL
-    dnf update -y
-    dnf install -y git vim curl wget
-  SHELL
-end
-EOF
     
     log_success "Provisionnement Rocky Linux configuré avec succès !"
     log_info "Le dossier vagrant a été créé dans: $ROCKY_PATH/vagrant"
-    log_info "Vous pouvez maintenant démarrer le serveur avec 'mise sous tension'"
+    log_info "Vous pouvez maintenant démarrer le serveur est deja mis sous tension vous pouvez y acceder avec la fonction connexion"
 }
 
 launch_ubuntu_provision() {
@@ -534,34 +525,14 @@ launch_ubuntu_provision() {
     # 5. Appliquer les playbooks Ansible
     # 6. Vérifier l'état des services
     
-    # Créer le dossier vagrant
-    log_info "Création du dossier vagrant..."
-    mkdir -p "$UBUNTU_PATH/vagrant"
-    
-    # Créer un Vagrantfile basique pour Ubuntu
-    log_info "Configuration Vagrantfile Ubuntu..."
-    cat > "$UBUNTU_PATH/vagrant/Vagrantfile" << 'EOF'
-Vagrant.configure("2") do |config|
-  config.vm.box = "ubuntu/jammy64"
-  config.vm.hostname = "ubuntu-dev"
-  
-  config.vm.network "private_network", ip: "192.168.56.11"
-  
-  config.vm.provider "virtualbox" do |vb|
-    vb.memory = "2048"
-    vb.cpus = 2
-  end
-  
-  config.vm.provision "shell", inline: <<-SHELL
-    apt-get update
-    apt-get install -y git vim curl wget
-  SHELL
-end
-EOF
+    cd "$UBUNTU_PATH/terraform"
+    terraform init
+    terraform plan
+    terraform apply
     
     log_success "Provisionnement Ubuntu configuré avec succès !"
     log_info "Le dossier vagrant a été créé dans: $UBUNTU_PATH/vagrant"
-    log_info "Vous pouvez maintenant démarrer le serveur avec 'mise sous tension'"
+    log_info "Vous pouvez maintenant démarrer le serveur est deja mis sous tension vous pouvez y acceder avec la fonction connexion"
 }
 
 launch_cloud_provision() {
@@ -598,6 +569,11 @@ launch_serverRepo_provision() {
         echo "Veuillez d'abord installer les outils via le menu principal"
         return 1
     fi
+
+    cd "$SERVERREPO_PATH/terraform"
+    terraform init
+    terraform plan
+    terraform apply
     
     # TODO: Implémenter le provisionnement complet
     # 1. Créer/copier le Vagrantfile approprié pour serverRepo
@@ -607,30 +583,10 @@ launch_serverRepo_provision() {
     # 5. Appliquer les playbooks Ansible
     # 6. Vérifier l'état des services
     
-    # SIMULATION POUR TEST
-    log_info "=== SIMULATION DE PROVISIONNEMENT serverRepo ==="
-    echo "1. Vérification du dossier existant..."
-    echo "   -> Dossier détecté: $SERVERREPO_PATH/"
-    echo "   -> Dossier vagrant détecté: $SERVERREPO_PATH/vagrant/"
-    sleep 1
-    echo "2. Configuration des services de repositories..."
-    sleep 1
-    echo "   -> Configuration Git server"
-    echo "   -> Configuration Docker registry"
-    echo "   -> Configuration package repositories"
-    echo "3. Initialisation des variables..."
-    sleep 1
-    echo "4. Démarrage des services..."
-    echo "   -> vagrant up"
-    sleep 2
-    echo "5. Application des playbooks Ansible..."
-    echo "   -> Configuration système, sécurité, services"
-    sleep 1
-    log_info "=== FIN DE LA SIMULATION ==="
     
-    log_success "Provisionnement serverRepo démarré avec succès !"
+    log_success "Provisionnement serverRepo terminé avec succès !"
     log_info "Utilisation du dossier vagrant existant: $SERVERREPO_PATH/vagrant"
-    log_warning "Note: Ceci était une simulation. Implémentation réelle à venir."
+    log_info "Vous pouvez maintenant démarrer le serveur est deja mis sous tension vous pouvez y acceder avec la fonction connexion"
 }
 
 
@@ -670,18 +626,42 @@ delete_rocky_provision() {
     # Arrêter et détruire les VMs Vagrant si elles existent
     if [ -f "$ROCKY_PATH/vagrant/Vagrantfile" ]; then
         log_info "Arrêt et destruction des VMs Rocky Linux..."
-        cd "$ROCKY_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+        cd "$ROCKY_PATH/vagrant"
+        
+        # Vérifier si des VMs sont en cours d'exécution
+        if vagrant status 2>/dev/null | grep -q "running"; then
+            log_info "Arrêt des VMs en cours d'exécution..."
+            vagrant halt 2>/dev/null || log_warning "Impossible d'arrêter les VMs"
+        fi
+        
+        # Détruire les VMs
+        log_info "Destruction des VMs..."
+        vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire ou erreur lors de la destruction"
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
     fi
     
-    # Supprimer le dossier vagrant
-    log_info "Suppression du dossier vagrant..."
-    rm -rf "$ROCKY_PATH/vagrant"
+    # Attendre un peu pour s'assurer que tous les processus sont terminés
+    sleep 2
     
-    if [ $? -eq 0 ]; then
+    # Supprimer le dossier vagrant avec force
+    log_info "Suppression du dossier vagrant..."
+    if rm -rf "$ROCKY_PATH/vagrant" 2>/dev/null; then
         log_success "Provisionnement Rocky Linux supprimé avec succès !"
     else
-        log_error "Erreur lors de la suppression du dossier vagrant"
-        return 1
+        log_warning "Première tentative de suppression échouée, nouvelle tentative..."
+        # Essayer de supprimer les fichiers cachés individuellement
+        if [ -d "$ROCKY_PATH/vagrant/.vagrant" ]; then
+            rm -rf "$ROCKY_PATH/vagrant/.vagrant" 2>/dev/null
+        fi
+        # Nouvelle tentative de suppression complète
+        if rm -rf "$ROCKY_PATH/vagrant" 2>/dev/null; then
+            log_success "Provisionnement Rocky Linux supprimé avec succès !"
+        else
+            log_error "Erreur lors de la suppression du dossier vagrant. Vérifiez les permissions."
+            return 1
+        fi
     fi
 }
 
@@ -696,18 +676,42 @@ delete_ubuntu_provision() {
     # Arrêter et détruire les VMs Vagrant si elles existent
     if [ -f "$UBUNTU_PATH/vagrant/Vagrantfile" ]; then
         log_info "Arrêt et destruction des VMs Ubuntu..."
-        cd "$UBUNTU_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+        cd "$UBUNTU_PATH/vagrant"
+        
+        # Vérifier si des VMs sont en cours d'exécution
+        if vagrant status 2>/dev/null | grep -q "running"; then
+            log_info "Arrêt des VMs en cours d'exécution..."
+            vagrant halt 2>/dev/null || log_warning "Impossible d'arrêter les VMs"
+        fi
+        
+        # Détruire les VMs
+        log_info "Destruction des VMs..."
+        vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire ou erreur lors de la destruction"
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
     fi
     
-    # Supprimer le dossier vagrant
-    log_info "Suppression du dossier vagrant..."
-    rm -rf "$UBUNTU_PATH/vagrant"
+    # Attendre un peu pour s'assurer que tous les processus sont terminés
+    sleep 2
     
-    if [ $? -eq 0 ]; then
+    # Supprimer le dossier vagrant avec force
+    log_info "Suppression du dossier vagrant..."
+    if rm -rf "$UBUNTU_PATH/vagrant" 2>/dev/null; then
         log_success "Provisionnement Ubuntu supprimé avec succès !"
     else
-        log_error "Erreur lors de la suppression du dossier vagrant"
-        return 1
+        log_warning "Première tentative de suppression échouée, nouvelle tentative..."
+        # Essayer de supprimer les fichiers cachés individuellement
+        if [ -d "$UBUNTU_PATH/vagrant/.vagrant" ]; then
+            rm -rf "$UBUNTU_PATH/vagrant/.vagrant" 2>/dev/null
+        fi
+        # Nouvelle tentative de suppression complète
+        if rm -rf "$UBUNTU_PATH/vagrant" 2>/dev/null; then
+            log_success "Provisionnement Ubuntu supprimé avec succès !"
+        else
+            log_error "Erreur lors de la suppression du dossier vagrant. Vérifiez les permissions."
+            return 1
+        fi
     fi
 }
 
@@ -753,18 +757,42 @@ delete_serverRepo_provision() {
     # Arrêter et détruire les VMs Vagrant si elles existent
     if [ -f "$SERVERREPO_PATH/vagrant/Vagrantfile" ]; then
         log_info "Arrêt et destruction des VMs serverRepo..."
-        cd "$SERVERREPO_PATH/vagrant" && vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire"
+        cd "$SERVERREPO_PATH/vagrant"
+        
+        # Vérifier si des VMs sont en cours d'exécution
+        if vagrant status 2>/dev/null | grep -q "running"; then
+            log_info "Arrêt des VMs en cours d'exécution..."
+            vagrant halt 2>/dev/null || log_warning "Impossible d'arrêter les VMs"
+        fi
+        
+        # Détruire les VMs
+        log_info "Destruction des VMs..."
+        vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire ou erreur lors de la destruction"
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
     fi
     
-    # Supprimer le dossier vagrant
-    log_info "Suppression du dossier vagrant..."
-    rm -rf "$SERVERREPO_PATH/vagrant"
+    # Attendre un peu pour s'assurer que tous les processus sont terminés
+    sleep 2
     
-    if [ $? -eq 0 ]; then
+    # Supprimer le dossier vagrant avec force
+    log_info "Suppression du dossier vagrant..."
+    if rm -rf "$SERVERREPO_PATH/vagrant" 2>/dev/null; then
         log_success "Provisionnement serverRepo supprimé avec succès !"
     else
-        log_error "Erreur lors de la suppression du dossier vagrant"
-        return 1
+        log_warning "Première tentative de suppression échouée, nouvelle tentative..."
+        # Essayer de supprimer les fichiers cachés individuellement
+        if [ -d "$SERVERREPO_PATH/vagrant/.vagrant" ]; then
+            rm -rf "$SERVERREPO_PATH/vagrant/.vagrant" 2>/dev/null
+        fi
+        # Nouvelle tentative de suppression complète
+        if rm -rf "$SERVERREPO_PATH/vagrant" 2>/dev/null; then
+            log_success "Provisionnement serverRepo supprimé avec succès !"
+        else
+            log_error "Erreur lors de la suppression du dossier vagrant. Vérifiez les permissions."
+            return 1
+        fi
     fi
 }
 
