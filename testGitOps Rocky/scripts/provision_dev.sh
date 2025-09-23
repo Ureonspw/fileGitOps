@@ -57,6 +57,13 @@ wget https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install
 sudo k3s kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 sudo k3s kubectl get all -n argocd
 
+# Récupère toutes les IP (sauf 127.x)
+VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | head -n 1)
+
+# Si aucune IP trouvée, fallback sur 127.0.0.1
+VM_IP=${VM_IP:-127.0.0.1}
+
+echo "[INFO] IP détectée : $VM_IP"
 
 ARGOCD_PWD=$(sudo k3s kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d)
@@ -366,7 +373,7 @@ echo " 🌍 Accedez a ArgoCD  :"
 echo ""
 echo " 👤 Username : admin"
 echo " 🔑 Password : $ARGOCD_PWD"
-echo " lien vers le service : http://192.168.33.10:8090"
+echo " lien vers le service : http://$VM_IP:8090"
 echo " comment lancer le service :  sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd "
 echo "pour creer une nouvelle app a traver argo via le cli (exemple foncctionnel): sudo k3s kubectl apply -f https://raw.githubusercontent.com/Ureonspw/testimgnigx/main/k8s/application.yaml -n argocd"
 echo " lancer code server : coder server"

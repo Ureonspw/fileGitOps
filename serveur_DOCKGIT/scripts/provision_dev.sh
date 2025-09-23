@@ -84,8 +84,13 @@ sudo systemctl start forgejo
 
 
 echo "=== Récupération IP de la VM ==="
-VM_IP=$(hostname -I | tr ' ' '\n' | grep '^192\.168\.' | head -n 1)
+
+# Récupère toutes les IP (sauf 127.x)
+VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | head -n 1)
+
+# Si aucune IP trouvée, fallback sur 127.0.0.1
 VM_IP=${VM_IP:-127.0.0.1}
+
 echo "[INFO] IP détectée : $VM_IP"
 
 HARBOR_DIR=/opt/harbor
