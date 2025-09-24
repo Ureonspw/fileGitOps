@@ -84,9 +84,8 @@ sudo systemctl start forgejo
 
 
 echo "=== Récupération IP de la VM ==="
-
-# Récupère toutes les IP (sauf 127.x)
-VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | head -n 1)
+# Récupère toutes les IP (sauf 127.x et 10.x)
+VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | grep -v '^10\.' | head -n 1)
 
 # Si aucune IP trouvée, fallback sur 127.0.0.1
 VM_IP=${VM_IP:-127.0.0.1}

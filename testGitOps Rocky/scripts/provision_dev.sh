@@ -57,8 +57,9 @@ wget https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install
 sudo k3s kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 sudo k3s kubectl get all -n argocd
 
-# Récupère toutes les IP (sauf 127.x)
-VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | head -n 1)
+echo "=== Récupération IP de la VM ==="
+# Récupère toutes les IP (sauf 127.x et 10.x)
+VM_IP=$(hostname -I | tr ' ' '\n' | grep -v '^127\.' | grep -v '^10\.' | head -n 1)
 
 # Si aucune IP trouvée, fallback sur 127.0.0.1
 VM_IP=${VM_IP:-127.0.0.1}
@@ -82,6 +83,8 @@ cat << 'EOF' > lancement.sh
 # === Dossier de destination ===
 DEST_DIR="/home/vagrant/scripts"
 mkdir -p "$DEST_DIR"
+chown vagrant:vagrant "$DEST_DIR"
+chmod 755 "$DEST_DIR"
 
 # === Générer le fichier template_Account dans le dossier ===
 
@@ -90,7 +93,18 @@ LOG_DIR="/home/vagrant/scripts"
 echo "=== Lancer Coder server en arrière-plan ==="
 sudo -u vagrant bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
 
+# Vérifier que le PID a été écrit
+if [ ! -f "$LOG_DIR/coder.pid" ]; then
+  echo "❌ Erreur: Impossible de créer le fichier PID"
+  exit 1
+fi
+
 SERVER_PID=$(cat $LOG_DIR/coder.pid)
+if [ -z "$SERVER_PID" ]; then
+  echo "❌ Erreur: PID vide"
+  exit 1
+fi
+
 echo "Coder server lancé avec PID $SERVER_PID"
 
 # === Attente que le lien soit disponible ===
@@ -105,7 +119,7 @@ done
 
 if [ -z "$LINK" ]; then
   echo "❌ Impossible de récupérer le lien Coder"
-  kill -SIGINT $SERVER_PID
+  kill -INT $SERVER_PID
   exit 1
 fi
 
@@ -337,7 +351,7 @@ coder template push -y
 
 
 # === Arrêter le serveur (comme Ctrl+C) ===
-kill -SIGINT $SERVER_PID
+kill -INT $SERVER_PID
 
 
 
@@ -347,6 +361,38 @@ echo "👉 Les logs et PID seront aussi stockés dans $DEST_DIR"
 EOF
 
 chmod +x lancement.sh
+
+# === Création du script veruser.sh ===
+cat << 'EOF' > veruser.sh
+#!/bin/bash
+
+echo "=== Détection automatique de l'utilisateur avec UID 1000 ==="
+USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+if [ -z "$USER_UID1000" ]; then
+  echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+  exit 1
+fi
+echo "✅ Utilisateur détecté: $USER_UID1000 (UID 1000)"
+
+echo "=== Modification du script lancement.sh ==="
+if [ ! -f "lancement.sh" ]; then
+  echo "❌ Erreur: Le fichier lancement.sh n'existe pas"
+  exit 1
+fi
+
+# Sauvegarde du fichier original
+cp lancement.sh lancement.sh.backup
+echo "✅ Sauvegarde créée: lancement.sh.backup"
+
+# Remplacement de toutes les occurrences de "vagrant" par l'utilisateur détecté
+sed -i "s/vagrant/$USER_UID1000/g" lancement.sh
+
+echo "✅ Script lancement.sh modifié avec l'utilisateur: $USER_UID1000"
+echo "🚀 Vous pouvez maintenant lancer: ./lancement.sh"
+
+EOF
+
+chmod +x veruser.sh
 
 
 
@@ -379,6 +425,7 @@ echo "pour creer une nouvelle app a traver argo via le cli (exemple foncctionnel
 echo " lancer code server : coder server"
 echo " lancer coder server en arrière-plan :"
 echo "   sudo -u vagrant bash -c \"nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid\""
+echo " 🔧 Pour adapter le script à votre utilisateur : ./veruser.sh"
 echo " 🚀 Pour créer le template : ./lancement.sh"
 echo "=============================================="
 
