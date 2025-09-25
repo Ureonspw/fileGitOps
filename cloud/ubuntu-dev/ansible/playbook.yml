@@ -1,0 +1,485 @@
+---
+- name: Provision Ubuntu Development Environment
+  hosts: ubuntu_dev
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    vm_ip: "{{ ansible_default_ipv4.address }}"
+    
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - software-properties-common
+          - curl
+          - wget
+          - apt-transport-https
+          - gnupg
+          - lsb-release
+          - expect
+        state: present
+
+    - name: Install Podman and Buildah
+      apt:
+        name:
+          - buildah
+          - podman
+          - runc
+        state: present
+
+    - name: Create containers configuration directory
+      file:
+        path: /etc/containers
+        state: directory
+        mode: '0755'
+
+    - name: Configure containers.conf
+      copy:
+        content: |
+          [engine]
+          cgroup_manager = "cgroupfs"
+          runtime = "runc"
+        dest: /etc/containers/containers.conf
+        mode: '0644'
+
+    - name: Copy containers.conf to system location
+      copy:
+        src: /etc/containers/containers.conf
+        dest: /usr/share/containers/containers.conf
+        remote_src: yes
+        mode: '0644'
+
+    - name: Install K3s
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig=$HOME/local-cluster.config --write-kubeconfig-mode=644" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for K3s service to be active
+      systemd:
+        name: k3s
+        state: started
+        enabled: yes
+      register: k3s_status
+      until: k3s_status.status.ActiveState == "active"
+      retries: 30
+      delay: 10
+
+    - name: Create ArgoCD namespace
+      kubernetes.core.k8s:
+        name: argocd
+        api_version: v1
+        kind: Namespace
+        state: present
+      when: k3s_status.status.ActiveState == "active"
+
+    - name: Download ArgoCD installation manifest
+      get_url:
+        url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        dest: /tmp/install.yaml
+        mode: '0644'
+
+    - name: Install ArgoCD
+      kubernetes.core.k8s:
+        state: present
+        src: /tmp/install.yaml
+        namespace: argocd
+      when: k3s_status.status.ActiveState == "active"
+
+    - name: Wait for ArgoCD pods to be ready
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: argocd
+        wait: yes
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      when: k3s_status.status.ActiveState == "active"
+
+    - name: Install Helm
+      shell: |
+        curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Install Coder
+      shell: |
+        curl -fsSL https://coder.com/install.sh | sh
+      args:
+        creates: /usr/local/bin/coder
+
+    - name: Create kubeconfig directory for root
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+
+    - name: Copy k3s kubeconfig to root
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /root/.kube/config
+        remote_src: yes
+        mode: '0600'
+
+    - name: Get ArgoCD admin password
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: argocd-initial-admin-secret
+        namespace: argocd
+      register: argocd_secret
+      when: k3s_status.status.ActiveState == "active"
+
+    - name: Decode ArgoCD password
+      set_fact:
+        argocd_password: "{{ argocd_secret.resources[0].data.password | b64decode }}"
+      when: 
+        - k3s_status.status.ActiveState == "active"
+        - argocd_secret.resources is defined
+
+    - name: Create launch script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # === Dossier de destination ===
+          DEST_DIR="/home/{{ ansible_user }}/scripts"
+          mkdir -p "$DEST_DIR"
+          chown {{ ansible_user }}:{{ ansible_user }} "$DEST_DIR"
+          chmod 755 "$DEST_DIR"
+          
+          # === Générer le fichier template_Account dans le dossier ===
+          
+          LOG_DIR="/home/{{ ansible_user }}/scripts"
+          
+          echo "=== Lancer Coder server en arrière-plan ==="
+          sudo -u {{ ansible_user }} bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
+          
+          # Vérifier que le PID a été écrit
+          if [ ! -f "$LOG_DIR/coder.pid" ]; then
+            echo "❌ Erreur: Impossible de créer le fichier PID"
+            exit 1
+          fi
+          
+          SERVER_PID=$(cat $LOG_DIR/coder.pid)
+          if [ -z "$SERVER_PID" ]; then
+            echo "❌ Erreur: PID vide"
+            exit 1
+          fi
+          
+          echo "Coder server lancé avec PID $SERVER_PID"
+          
+          # === Attente que le lien soit disponible ===
+          echo "⏳ Attente du lien Coder..."
+          for i in {1..30}; do
+            LINK=$(grep -o "https://[a-z0-9]\+\.pit-1\.try\.coder\.app" $LOG_DIR/coder.log | head -n 1 || true)
+            if [ -n "$LINK" ]; then
+              break
+            fi
+            sleep 2
+          done
+          
+          if [ -z "$LINK" ]; then
+            echo "❌ Impossible de récupérer le lien Coder"
+            kill -INT $SERVER_PID
+            exit 1
+          fi
+          
+          echo "Lien trouvé : $LINK"
+          
+          # === Lancer Coder login en interactif (tu remplis manuellement) ===
+          sudo -u {{ ansible_user }} coder login $LINK
+          
+          # === Une fois terminé, on continue ===
+          echo "✅ Utilisateur créé avec succès."
+          
+          systemctl --user enable --now podman.socket
+          
+          mkdir podmantemplate
+          cat << 'EOF_MAIN' > podmantemplate/main.tf
+          
+          
+          terraform {
+            required_providers {
+              coder = {
+                source = "coder/coder"
+              }
+              docker = {
+                source = "kreuzwerker/docker"
+              }
+            }
+          }
+          
+          locals {
+            username = data.coder_workspace_owner.me.name
+          }
+          
+          variable "docker_socket" {
+            default     = "unix:///run/user/1000/podman/podman.sock"
+            description = "(Optional) Podman/Docker socket URI"
+            type        = string
+          }
+          
+          provider "docker" {
+            host = var.docker_socket != "" ? var.docker_socket : null
+          }
+          
+          data "coder_provisioner" "me" {}
+          data "coder_workspace" "me" {}
+          data "coder_workspace_owner" "me" {}
+          
+          resource "coder_agent" "main" {
+            arch           = data.coder_provisioner.me.arch
+            os             = "linux"
+            startup_script = <<-EOT
+              set -e
+              
+              # Prépare le home utilisateur au premier démarrage
+              if [ ! -f ~/.init_done ]; then
+                cp -rT /etc/skel ~
+                touch ~/.init_done
+              fi
+            EOT
+            
+            env = {
+              GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+              GIT_AUTHOR_EMAIL    = "${data.coder_workspace_owner.me.email}"
+              GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+              GIT_COMMITTER_EMAIL = "${data.coder_workspace_owner.me.email}"
+            }
+            
+            
+            metadata {
+              display_name = "Home Disk"
+              key          = "3_home_disk"
+              script       = "coder stat disk --path $${HOME}"
+              interval     = 60
+              timeout      = 1
+            }
+            
+            metadata {
+              display_name = "CPU Usage"
+              key          = "4_cpu_usage_host"
+              script       = "coder stat cpu --host"
+              interval     = 10
+              timeout      = 1
+            }
+            
+            metadata {
+              display_name = "Memory Usage"
+              key          = "5_mem_usage_host"
+              script       = "coder stat mem --host"
+              interval     = 10
+              timeout      = 1
+            }
+            
+            metadata {
+              display_name = "Load Average (Host)"
+              key          = "6_load_host"
+              script   = <<EOT
+                echo "`cat /proc/loadavg | awk '{ print $1 }'` `nproc`" | awk '{ printf "%0.2f", $1/$2 }'
+              EOT
+              interval = 60
+              timeout  = 1
+            }
+            
+            metadata {
+              display_name = "Swap Usage (Host)"
+              key          = "7_swap_host"
+              script       = <<EOT
+                free -b | awk '/^Swap/ { printf("%.1f/%.1f", $3/1024.0/1024.0/1024.0, $2/1024.0/1024.0/1024.0) }'
+              EOT
+              interval     = 10
+              timeout      = 1
+            }
+          }
+          
+          module "code-server" {
+            count  = data.coder_workspace.me.start_count
+            source = "registry.coder.com/coder/code-server/coder"
+            version = "~> 1.0"
+            
+            agent_id = coder_agent.main.id
+            order    = 1
+          }
+          
+          module "jetbrains_gateway" {
+            count  = data.coder_workspace.me.start_count
+            source = "registry.coder.com/coder/jetbrains-gateway/coder"
+            
+            jetbrains_ides = ["IU", "PS", "WS", "PY", "CL", "GO", "RM", "RD", "RR"]
+            default        = "IU"
+            folder         = "/home/coder"
+            
+            version    = "~> 1.0"
+            agent_id   = coder_agent.main.id
+            agent_name = "main"
+            order      = 2
+          }
+          
+          resource "docker_volume" "home_volume" {
+            name = "coder-${data.coder_workspace.me.id}-home"
+            
+            lifecycle {
+              ignore_changes = all
+            }
+            
+            labels {
+              label = "coder.owner"
+              value = data.coder_workspace_owner.me.name
+            }
+            labels {
+              label = "coder.owner_id"
+              value = data.coder_workspace_owner.me.id
+            }
+            labels {
+              label = "coder.workspace_id"
+              value = data.coder_workspace.me.id
+            }
+            labels {
+              label = "coder.workspace_name_at_creation"
+              value = data.coder_workspace.me.name
+            }
+          }
+          
+          resource "docker_container" "workspace" {
+            count = data.coder_workspace.me.start_count
+            image = "codercom/enterprise-base:ubuntu"
+            
+            name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
+            hostname = data.coder_workspace.me.name
+            
+            entrypoint = [
+              "sh", "-c",
+              replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.containers.internal")
+            ]
+            
+            env = ["CODER_AGENT_TOKEN=${coder_agent.main.token}"]
+            
+            host {
+              host = "host.containers.internal"
+              ip   = "host-gateway"
+            }
+            
+            volumes {
+              container_path = "/home/coder"
+              volume_name    = docker_volume.home_volume.name
+              read_only      = false
+            }
+            
+            labels {
+              label = "coder.owner"
+              value = data.coder_workspace_owner.me.name
+            }
+            labels {
+              label = "coder.owner_id"
+              value = data.coder_workspace_owner.me.id
+            }
+            labels {
+              label = "coder.workspace_id"
+              value = data.coder_workspace.me.id
+            }
+            labels {
+              label = "coder.workspace_name"
+              value = data.coder_workspace.me.name
+            }
+          }
+          
+          EOF_MAIN
+          
+          cat << 'EOF_README' > podmantemplate/README.md
+          
+          ---
+          display_name: CODE_SERVER_PODMAN
+          description: le template de base avec les container podman
+          icon: ../../../site/static/emojis/1f4e6.png
+          maintainer_github: coder
+          verified: true
+          tags: []
+          ---
+          
+          # A minimal Scaffolding for a Coder Template
+          
+          c'est mon template que j'ai creer de base avec podman et codeserver. Il creeras ton workspace avec un container podman et un codeserver.
+          
+          EOF_README
+          
+          cd podmantemplate
+          
+          coder template push -y  
+          
+          
+          
+          
+          
+          # === Arrêter le serveur (comme Ctrl+C) ===
+          kill -INT $SERVER_PID
+          
+          
+          
+          echo "✅ Le script template_Account a été généré dans $DEST_DIR"
+          echo "👉 Les logs et PID seront aussi stockés dans $DEST_DIR"
+        dest: /home/{{ ansible_user }}/lancement.sh
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Create user verification script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          echo "=== Détection automatique de l'utilisateur avec UID 1000 ==="
+          USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+          if [ -z "$USER_UID1000" ]; then
+            echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+            exit 1
+          fi
+          echo "✅ Utilisateur détecté: $USER_UID1000 (UID 1000)"
+          
+          echo "=== Modification du script lancement.sh ==="
+          if [ ! -f "lancement.sh" ]; then
+            echo "❌ Erreur: Le fichier lancement.sh n'existe pas"
+            exit 1
+          fi
+          
+          # Sauvegarde du fichier original
+          cp lancement.sh lancement.sh.backup
+          echo "✅ Sauvegarde créée: lancement.sh.backup"
+          
+          # Remplacement de toutes les occurrences de "{{ ansible_user }}" par l'utilisateur détecté
+          sed -i "s/{{ ansible_user }}/$USER_UID1000/g" lancement.sh
+          
+          echo "✅ Script lancement.sh modifié avec l'utilisateur: $USER_UID1000"
+          echo "🚀 Vous pouvez maintenant lancer: ./lancement.sh"
+        dest: /home/{{ ansible_user }}/veruser.sh
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Display final information
+      debug:
+        msg: |
+          ==============================================
+           🌍 Accédez à ArgoCD :
+          
+           👤 Username : admin
+           🔑 Password : {{ argocd_password | default('Non disponible') }}
+           Lien : http://{{ vm_ip }}:8090
+          
+           Lancez la commande suivante pour exposer ArgoCD :
+             sudo kubectl port-forward --address 0.0.0.0 svc/argocd-server 8090:80 -n argocd
+           lancer code server : coder server
+           lancer coder server en arrière-plan :
+             sudo -u {{ ansible_user }} bash -c "nohup coder server > /home/{{ ansible_user }}/coder.log 2>&1 & echo \$! > /home/{{ ansible_user }}/coder.pid"
+           🔧 Pour adapter le script à votre utilisateur : ./veruser.sh
+           🚀 Pour créer le template : ./lancement.sh
+          ==============================================

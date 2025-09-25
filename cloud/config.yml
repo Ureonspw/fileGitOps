@@ -1,0 +1,102 @@
+# Configuration globale pour le provisionnement cloud
+# Modifiez ces valeurs selon vos besoins
+
+# Configuration générale
+global:
+  # Timeout pour les connexions SSH (en secondes)
+  ssh_timeout: 30
+  
+  # Nombre de tentatives pour les connexions
+  ssh_retries: 3
+  
+  # Arguments SSH communs
+  ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Configuration pour Ubuntu Dev
+ubuntu_dev:
+  # Utilisateur par défaut
+  default_user: "ubuntu"
+  
+  # Ports par défaut
+  ports:
+    argocd: 8090
+    coder: 3000
+  
+  # Versions des logiciels
+  versions:
+    k3s: "latest"
+    argocd: "stable"
+    coder: "latest"
+
+# Configuration pour Rocky Dev
+rocky_dev:
+  # Utilisateur par défaut
+  default_user: "rocky"
+  
+  # Ports par défaut
+  ports:
+    argocd: 8090
+    coder: 3000
+  
+  # Versions des logiciels
+  versions:
+    k3s: "latest"
+    argocd: "stable"
+    coder: "latest"
+
+# Configuration pour Dockgit
+dockgit:
+  # Utilisateur par défaut
+  default_user: "root"
+  
+  # Ports par défaut
+  ports:
+    harbor: 443
+    forgejo: 3001
+  
+  # Versions des logiciels
+  versions:
+    harbor: "v2.11.0"
+    forgejo: "11"
+  
+  # Mots de passe par défaut
+  passwords:
+    harbor_admin: "Harbor12345"
+    forgejo_postgres: "ForgejoSecurePass2024!"
+
+# Configuration des conteneurs
+containers:
+  # Configuration Podman/Docker
+  podman:
+    cgroup_manager: "cgroupfs"
+    runtime: "runc"
+  
+  # Images par défaut
+  images:
+    postgres: "docker.io/library/postgres:15"
+    forgejo: "codeberg.org/forgejo/forgejo:11"
+    coder_base: "codercom/enterprise-base:ubuntu"
+
+# Configuration Kubernetes
+kubernetes:
+  # Configuration K3s
+  k3s:
+    write_kubeconfig: true
+    kubeconfig_mode: "644"
+  
+  # Configuration ArgoCD
+  argocd:
+    namespace: "argocd"
+    wait_timeout: 300
+
+# Configuration des certificats SSL
+ssl:
+  # Durée de validité des certificats (en jours)
+  cert_validity_days: 365
+  
+  # Informations du certificat
+  cert_info:
+    country: "CI"
+    state: "Abidjan"
+    city: "Abidjan"
+    organization: "HarborLab"

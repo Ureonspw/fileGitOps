@@ -1,0 +1,265 @@
+---
+- name: Provision Dockgit Environment (Forgejo + Harbor)
+  hosts: dockgit
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    vm_ip: "{{ ansible_default_ipv4.address }}"
+    harbor_version: "v2.11.0"
+    harbor_password: "Harbor12345"
+    
+  tasks:
+    - name: Install base tools
+      dnf:
+        name:
+          - dnf-plugins-core
+          - curl
+          - buildah
+          - podman
+          - runc
+          - wget
+          - tar
+          - openssl
+        state: present
+
+    - name: Create containers configuration directory
+      file:
+        path: /etc/containers
+        state: directory
+        mode: '0755'
+
+    - name: Configure containers.conf
+      copy:
+        content: |
+          [engine]
+          cgroup_manager = "cgroupfs"
+          runtime = "runc"
+        dest: /etc/containers/containers.conf
+        mode: '0644'
+
+    - name: Copy containers.conf to system location
+      copy:
+        src: /etc/containers/containers.conf
+        dest: /usr/share/containers/containers.conf
+        remote_src: yes
+        mode: '0644'
+
+    - name: Create systemd containers directory
+      file:
+        path: /etc/containers/systemd
+        state: directory
+        mode: '0755'
+
+    - name: Create Forgejo network configuration
+      copy:
+        content: |
+          [Network]
+          NetworkName=forgejo
+        dest: /etc/containers/systemd/forgejo.network
+        mode: '0644'
+
+    - name: Create PostgreSQL data volume configuration
+      copy:
+        content: |
+          [Volume]
+          VolumeName=postgres-data
+        dest: /etc/containers/systemd/postgres-data.volume
+        mode: '0644'
+
+    - name: Create Forgejo data volume configuration
+      copy:
+        content: |
+          [Volume]
+          VolumeName=forgejo-data
+        dest: /etc/containers/systemd/forgejo-data.volume
+        mode: '0644'
+
+    - name: Create PostgreSQL container configuration
+      copy:
+        content: |
+          [Container]
+          ContainerName=postgres
+          Environment=POSTGRES_DB=forgejo
+          Environment=POSTGRES_USER=forgejo
+          Environment=POSTGRES_PASSWORD=ForgejoSecurePass2024!
+          Image=docker.io/library/postgres:15
+          Network=forgejo.network
+          Volume=postgres-data:/var/lib/postgresql/data
+          
+          [Service]
+          Restart=always
+          
+          [Install]
+          WantedBy=default.target
+        dest: /etc/containers/systemd/postgres.container
+        mode: '0644'
+
+    - name: Create Forgejo container configuration
+      copy:
+        content: |
+          [Container]
+          ContainerName=forgejo
+          Environment=USER_UID=1000
+          Environment=USER_GID=1000
+          Image=codeberg.org/forgejo/forgejo:11
+          Network=forgejo.network
+          PublishPort=3001:3000
+          PublishPort=222:22
+          Volume=forgejo-data:/data
+          
+          [Service]
+          Restart=always
+          
+          [Install]
+          WantedBy=default.target
+        dest: /etc/containers/systemd/forgejo.container
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start PostgreSQL service
+      systemd:
+        name: postgres
+        state: started
+        enabled: yes
+
+    - name: Start Forgejo service
+      systemd:
+        name: forgejo
+        state: started
+        enabled: yes
+
+    - name: Add Docker CE repository
+      yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable - $basearch
+        baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        gpgcheck: yes
+        enabled: yes
+
+    - name: Install Docker CE and Compose plugin
+      dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create Harbor directory
+      file:
+        path: /opt/harbor
+        state: directory
+        mode: '0755'
+
+    - name: Create Harbor certificates directory
+      file:
+        path: /etc/harbor/certs
+        state: directory
+        mode: '0755'
+
+    - name: Download Harbor
+      get_url:
+        url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-installer-{{ harbor_version }}.tgz"
+        dest: /tmp/harbor-online-installer-{{ harbor_version }}.tgz
+        mode: '0644'
+
+    - name: Extract Harbor
+      unarchive:
+        src: /tmp/harbor-online-installer-{{ harbor_version }}.tgz
+        dest: /tmp
+        remote_src: yes
+
+    - name: Move Harbor to /opt
+      shell: mv /tmp/harbor /opt/harbor
+      args:
+        creates: /opt/harbor
+
+    - name: Copy Harbor configuration template
+      copy:
+        src: /opt/harbor/harbor.yml.tmpl
+        dest: /opt/harbor/harbor.yml
+        remote_src: yes
+        mode: '0644'
+
+    - name: Generate SSL certificates for Harbor
+      shell: |
+        cat > /tmp/harbor-openssl.cnf <<EOF
+        [req]
+        default_bits       = 4096
+        distinguished_name = req_distinguished_name
+        req_extensions     = v3_req
+        prompt             = no
+        
+        [req_distinguished_name]
+        C  = CI
+        ST = Abidjan
+        L  = Abidjan
+        O  = HarborLab
+        CN = {{ vm_ip }}
+        
+        [v3_req]
+        subjectAltName = @alt_names
+        
+        [alt_names]
+        IP.1 = {{ vm_ip }}
+        EOF
+        
+        openssl req -x509 -nodes -days 365 \
+         -keyout /etc/harbor/certs/harbor.key \
+         -out /etc/harbor/certs/harbor.crt \
+         -config /tmp/harbor-openssl.cnf -extensions v3_req
+      args:
+        creates: /etc/harbor/certs/harbor.crt
+
+    - name: Configure Harbor
+      replace:
+        path: /opt/harbor/harbor.yml
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}"
+      loop:
+        - { regexp: '^hostname:.*', replace: 'hostname: {{ vm_ip }}' }
+        - { regexp: '^harbor_admin_password:.*', replace: 'harbor_admin_password: {{ harbor_password }}' }
+        - { regexp: '^certificate:.*', replace: 'certificate: /etc/harbor/certs/harbor.crt' }
+        - { regexp: '^private_key:.*', replace: 'private_key: /etc/harbor/certs/harbor.key' }
+
+    - name: Install Harbor
+      shell: ./install.sh
+      args:
+        chdir: /opt/harbor
+        creates: /opt/harbor/harbor
+
+    - name: Create Podman certificates directory for Harbor
+      file:
+        path: "/etc/containers/certs.d/{{ vm_ip }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy Harbor certificate for Podman
+      copy:
+        src: /etc/harbor/certs/harbor.crt
+        dest: "/etc/containers/certs.d/{{ vm_ip }}/ca.crt"
+        remote_src: yes
+        mode: '0644'
+
+    - name: Display final information
+      debug:
+        msg: |
+          =======================================================
+           Harbor est installé avec succès !
+           Accès web : https://{{ vm_ip }}
+           Login : admin / {{ harbor_password }}
+           
+           Forgejo est installé avec succès !
+           Accès web : http://{{ vm_ip }}:3001
+          =======================================================

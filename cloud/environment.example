@@ -1,0 +1,43 @@
+# Fichier d'exemple pour les variables d'environnement
+# Copiez ce fichier vers environment.conf et modifiez les valeurs selon vos besoins
+
+# Configuration SSH globale
+SSH_TIMEOUT=30
+SSH_RETRIES=3
+
+# Configuration Ansible
+ANSIBLE_FORKS=10
+ANSIBLE_TIMEOUT=30
+
+# Configuration des ports par défaut
+ARGOCD_PORT=8090
+CODER_PORT=3000
+HARBOR_PORT=443
+FORGEJO_PORT=3001
+
+# Mots de passe par défaut (changez-les en production !)
+HARBOR_ADMIN_PASSWORD=Harbor12345
+FORGEJO_POSTGRES_PASSWORD=ForgejoSecurePass2024!
+
+# Versions des logiciels
+K3S_VERSION=latest
+ARGOCD_VERSION=stable
+CODER_VERSION=latest
+HARBOR_VERSION=v2.11.0
+FORGEJO_VERSION=11
+
+# Configuration des certificats SSL
+SSL_CERT_VALIDITY_DAYS=365
+SSL_CERT_COUNTRY=CI
+SSL_CERT_STATE=Abidjan
+SSL_CERT_CITY=Abidjan
+SSL_CERT_ORGANIZATION=HarborLab
+
+# Configuration des conteneurs
+PODMAN_CGROUP_MANAGER=cgroupfs
+PODMAN_RUNTIME=runc
+
+# Images Docker par défaut
+POSTGRES_IMAGE=docker.io/library/postgres:15
+FORGEJO_IMAGE=codeberg.org/forgejo/forgejo:11
+CODER_BASE_IMAGE=codercom/enterprise-base:ubuntu

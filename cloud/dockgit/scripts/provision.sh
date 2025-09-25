@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Script de provisionnement rapide pour Dockgit
+# Utilise le script de configuration principal
+
+set -e
+
+# Couleurs pour l'affichage
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Vérifier que nous sommes dans le bon répertoire
+if [[ ! -f "../../configure.sh" ]]; then
+    echo "Erreur: Script de configuration non trouvé. Veuillez exécuter depuis le dossier cloud/dockgit/scripts/"
+    exit 1
+fi
+
+print_info "=== Provisionnement Dockgit ==="
+print_info "Ce script va configurer un environnement Dockgit avec :"
+print_info "- Forgejo (Git self-hosted)"
+print_info "- Harbor (Registry de conteneurs)"
+print_info "- Podman (Conteneurs)"
+echo
+
+# Exécuter le script de configuration principal
+cd ../..
+chmod +x configure.sh
+./configure.sh dockgit
+
+print_success "Provisionnement Dockgit terminé !"

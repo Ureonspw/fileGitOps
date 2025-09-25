@@ -1,0 +1,29 @@
+# Dépendances pour le provisionnement cloud avec Ansible
+# Ce fichier liste tous les outils nécessaires
+
+# Ansible (obligatoire)
+ansible>=6.0.0
+
+# Outils optionnels pour améliorer l'expérience
+# Installation automatique via les scripts si nécessaire
+
+# Pour l'authentification par mot de passe SSH
+sshpass
+
+# Pour les tests de connectivité
+netcat-openbsd  # ou netcat sur certains systèmes
+
+# Pour macOS (via Homebrew)
+# brew install ansible sshpass netcat
+
+# Pour Ubuntu/Debian
+# sudo apt-get install ansible sshpass netcat-openbsd
+
+# Pour CentOS/RHEL/Rocky
+# sudo yum install ansible sshpass nc
+# ou
+# sudo dnf install ansible sshpass nc
+
+# Collections Ansible nécessaires
+# ansible-galaxy collection install kubernetes.core
+# ansible-galaxy collection install community.general
