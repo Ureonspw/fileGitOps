@@ -10,6 +10,12 @@
     harbor_password: "Harbor12345"
     
   tasks:
+    - name: Disable and stop firewalld
+      systemd:
+        name: firewalld
+        state: stopped
+        enabled: no
+
     - name: Install base tools
       dnf:
         name:
@@ -120,6 +126,16 @@
       systemd:
         daemon_reload: yes
 
+    - name: Create Podman network for Forgejo
+      shell: podman network create forgejo
+      failed_when: false
+
+    - name: Create Podman volumes for Forgejo
+      shell: |
+        podman volume create postgres-data
+        podman volume create forgejo-data
+      failed_when: false
+
     - name: Start PostgreSQL service
       systemd:
         name: postgres
@@ -181,9 +197,11 @@
         remote_src: yes
 
     - name: Move Harbor to /opt
-      shell: mv /tmp/harbor /opt/harbor
+      shell: |
+        rm -rf /opt/harbor
+        mv /tmp/harbor /opt/harbor
       args:
-        creates: /opt/harbor
+        creates: /opt/harbor/harbor.yml.tmpl
 
     - name: Copy Harbor configuration template
       copy:
@@ -232,12 +250,29 @@
         - { regexp: '^harbor_admin_password:.*', replace: 'harbor_admin_password: {{ harbor_password }}' }
         - { regexp: '^certificate:.*', replace: 'certificate: /etc/harbor/certs/harbor.crt' }
         - { regexp: '^private_key:.*', replace: 'private_key: /etc/harbor/certs/harbor.key' }
+        - { regexp: '^https:', replace: 'https:' }
+        - { regexp: '^  port: 443', replace: '  port: 443' }
+        - { regexp: '^  certificate:.*', replace: '  certificate: /etc/harbor/certs/harbor.crt' }
+        - { regexp: '^  private_key:.*', replace: '  private_key: /etc/harbor/certs/harbor.key' }
 
     - name: Install Harbor
       shell: ./install.sh
       args:
         chdir: /opt/harbor
         creates: /opt/harbor/harbor
+      failed_when: false
+
+    - name: Check if Harbor is running
+      shell: docker ps | grep harbor || echo "Harbor not running"
+      register: harbor_status
+      changed_when: false
+
+    - name: Start Harbor if not running
+      shell: |
+        cd /opt/harbor
+        docker-compose up -d
+      when: "'harbor' not in harbor_status.stdout"
+      failed_when: false
 
     - name: Create Podman certificates directory for Harbor
       file:

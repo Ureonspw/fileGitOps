@@ -8,6 +8,10 @@
     vm_ip: "{{ ansible_default_ipv4.address }}"
     
   tasks:
+    - name: Disable and stop UFW firewall
+      ufw:
+        state: disabled
+
     - name: Update package cache
       apt:
         update_cache: yes
@@ -23,6 +27,14 @@
           - gnupg
           - lsb-release
           - expect
+          - python3-pip
+        state: present
+
+    - name: Install Python dependencies
+      pip:
+        name:
+          - packaging
+          - kubernetes
         state: present
 
     - name: Install Podman and Buildah
@@ -57,19 +69,27 @@
 
     - name: Install K3s
       shell: |
-        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig=$HOME/local-cluster.config --write-kubeconfig-mode=644" sh -
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=" - write-kubeconfig=$HOME/local-cluster.config - write-kubeconfig-mode=644" sh -
       args:
         creates: /usr/local/bin/k3s
 
-    - name: Wait for K3s service to be active
+    - name: Start and enable K3s service
       systemd:
         name: k3s
         state: started
         enabled: yes
-      register: k3s_status
-      until: k3s_status.status.ActiveState == "active"
+
+    - name: Wait for K3s cluster to have at least 1 node
+      shell: /usr/local/bin/k3s kubectl get nodes --no-headers
+      register: k3s_nodes
+      until: k3s_nodes.stdout_lines | length >= 1
       retries: 30
-      delay: 10
+      delay: 5
+
+    - name: Wait for all nodes to be Ready
+      shell: /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=120s
+      register: k3s_ready
+      failed_when: k3s_ready.rc != 0
 
     - name: Create ArgoCD namespace
       kubernetes.core.k8s:
@@ -77,7 +97,7 @@
         api_version: v1
         kind: Namespace
         state: present
-      when: k3s_status.status.ActiveState == "active"
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
 
     - name: Download ArgoCD installation manifest
       get_url:
@@ -90,7 +110,7 @@
         state: present
         src: /tmp/install.yaml
         namespace: argocd
-      when: k3s_status.status.ActiveState == "active"
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
 
     - name: Wait for ArgoCD pods to be ready
       kubernetes.core.k8s_info:
@@ -102,7 +122,7 @@
           type: Ready
           status: "True"
         wait_timeout: 300
-      when: k3s_status.status.ActiveState == "active"
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
 
     - name: Install Helm
       shell: |
@@ -115,6 +135,7 @@
         curl -fsSL https://coder.com/install.sh | sh
       args:
         creates: /usr/local/bin/coder
+      failed_when: false
 
     - name: Create kubeconfig directory for root
       file:
@@ -135,15 +156,29 @@
         kind: Secret
         name: argocd-initial-admin-secret
         namespace: argocd
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
       register: argocd_secret
-      when: k3s_status.status.ActiveState == "active"
 
     - name: Decode ArgoCD password
       set_fact:
         argocd_password: "{{ argocd_secret.resources[0].data.password | b64decode }}"
-      when: 
-        - k3s_status.status.ActiveState == "active"
-        - argocd_secret.resources is defined
+      when: argocd_secret.resources is defined
+
+    - name: Get user with UID 1000
+      shell: "getent passwd 1000 | cut -d: -f1"
+      register: user_uid1000
+      changed_when: false
+
+    - name: Enable linger for user to allow user services
+      shell: |
+        loginctl enable-linger {{ user_uid1000.stdout }}
+      become: yes
+
+    - name: Enable and start Podman socket for user
+      shell: |
+        su - {{ user_uid1000.stdout }} -c "systemctl --user enable --now podman.socket"
+      become: yes
+      failed_when: false
 
     - name: Create launch script
       copy:
@@ -151,17 +186,17 @@
           #!/bin/bash
           
           # === Dossier de destination ===
-          DEST_DIR="/home/{{ ansible_user }}/scripts"
+          DEST_DIR="/home/{{ user_uid1000.stdout }}/scripts"
           mkdir -p "$DEST_DIR"
-          chown {{ ansible_user }}:{{ ansible_user }} "$DEST_DIR"
+          chown {{ user_uid1000.stdout }}:{{ user_uid1000.stdout }} "$DEST_DIR"
           chmod 755 "$DEST_DIR"
           
           # === Générer le fichier template_Account dans le dossier ===
           
-          LOG_DIR="/home/{{ ansible_user }}/scripts"
+          LOG_DIR="/home/{{ user_uid1000.stdout }}/scripts"
           
           echo "=== Lancer Coder server en arrière-plan ==="
-          sudo -u {{ ansible_user }} bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
+          sudo -u {{ user_uid1000.stdout }} bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
           
           # Vérifier que le PID a été écrit
           if [ ! -f "$LOG_DIR/coder.pid" ]; then
@@ -196,11 +231,13 @@
           echo "Lien trouvé : $LINK"
           
           # === Lancer Coder login en interactif (tu remplis manuellement) ===
-          sudo -u {{ ansible_user }} coder login $LINK
+          sudo -u {{ user_uid1000.stdout }} coder login $LINK
           
           # === Une fois terminé, on continue ===
           echo "✅ Utilisateur créé avec succès."
           
+          # === Activer le socket Podman pour l'utilisateur ===
+          echo "🔧 Activation du socket Podman..."
           systemctl --user enable --now podman.socket
           
           mkdir podmantemplate
@@ -427,10 +464,10 @@
           
           echo "✅ Le script template_Account a été généré dans $DEST_DIR"
           echo "👉 Les logs et PID seront aussi stockés dans $DEST_DIR"
-        dest: /home/{{ ansible_user }}/lancement.sh
+        dest: /home/{{ user_uid1000.stdout }}/lancement.sh
         mode: '0755'
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
+        owner: "{{ user_uid1000.stdout }}"
+        group: "{{ user_uid1000.stdout }}"
 
     - name: Create user verification script
       copy:
@@ -455,15 +492,15 @@
           cp lancement.sh lancement.sh.backup
           echo "✅ Sauvegarde créée: lancement.sh.backup"
           
-          # Remplacement de toutes les occurrences de "{{ ansible_user }}" par l'utilisateur détecté
-          sed -i "s/{{ ansible_user }}/$USER_UID1000/g" lancement.sh
+          # Remplacement de toutes les occurrences de "{{ user_uid1000.stdout }}" par l'utilisateur détecté
+          sed -i "s/{{ user_uid1000.stdout }}/$USER_UID1000/g" lancement.sh
           
           echo "✅ Script lancement.sh modifié avec l'utilisateur: $USER_UID1000"
           echo "🚀 Vous pouvez maintenant lancer: ./lancement.sh"
-        dest: /home/{{ ansible_user }}/veruser.sh
+        dest: /home/{{ user_uid1000.stdout }}/veruser.sh
         mode: '0755'
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
+        owner: "{{ user_uid1000.stdout }}"
+        group: "{{ user_uid1000.stdout }}"
 
     - name: Display final information
       debug:
@@ -476,10 +513,10 @@
            Lien : http://{{ vm_ip }}:8090
           
            Lancez la commande suivante pour exposer ArgoCD :
-             sudo kubectl port-forward --address 0.0.0.0 svc/argocd-server 8090:80 -n argocd
+             sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd
            lancer code server : coder server
            lancer coder server en arrière-plan :
-             sudo -u {{ ansible_user }} bash -c "nohup coder server > /home/{{ ansible_user }}/coder.log 2>&1 & echo \$! > /home/{{ ansible_user }}/coder.pid"
+             sudo -u {{ user_uid1000.stdout }} bash -c "nohup coder server > /home/{{ user_uid1000.stdout }}/coder.log 2>&1 & echo \$! > /home/{{ user_uid1000.stdout }}/coder.pid"
            🔧 Pour adapter le script à votre utilisateur : ./veruser.sh
            🚀 Pour créer le template : ./lancement.sh
           ==============================================
