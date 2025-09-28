@@ -503,3 +503,26 @@
            🔧 Pour adapter le script à votre utilisateur : ./veruser.sh
            🚀 Pour créer le template : ./lancement.sh
           ==============================================
+
+    - name: copy display information in a file
+      copy:
+        content: |
+          ==============================================
+           🌍 Accédez à ArgoCD :
+          
+           👤 Username : admin
+           🔑 Password : {{ argocd_password | default('Non disponible') }}
+           Lien : http://{{ vm_ip }}:8090
+          
+           Lancez la commande suivante pour exposer ArgoCD :
+             sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd
+           lancer code server : coder server
+           lancer coder server en arrière-plan :
+             sudo -u {{ user_uid1000.stdout }} bash -c "nohup coder server > /home/{{ user_uid1000.stdout }}/coder.log 2>&1 & echo \$! > /home/{{ user_uid1000.stdout }}/coder.pid"
+           🔧 Pour adapter le script à votre utilisateur : ./veruser.sh
+           🚀 Pour créer le template : ./lancement.sh
+          ==============================================
+        dest: /home/{{ user_uid1000.stdout }}/display_information.txt
+        mode: '0755'
+        owner: "{{ user_uid1000.stdout }}"
+        group: "{{ user_uid1000.stdout }}"

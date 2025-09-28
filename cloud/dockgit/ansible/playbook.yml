@@ -298,3 +298,19 @@
            Forgejo est installé avec succès !
            Accès web : http://{{ vm_ip }}:3001
           =======================================================
+
+    - name: copy display information in a file
+      copy:
+        content: |
+          =======================================================
+           Harbor est installé avec succès !
+           Accès web : https://{{ vm_ip }}
+           Login : admin / {{ harbor_password }}
+           
+           Forgejo est installé avec succès !
+           Accès web : http://{{ vm_ip }}:3001
+          =======================================================
+        dest: /root/display_information.txt
+        mode: '0755'
+        owner: root
+        group: root
