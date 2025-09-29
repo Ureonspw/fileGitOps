@@ -539,16 +539,49 @@ launch_cloud_provision() {
     log_info "Lancement du provisionnement cloud..."
     
     # Vérifier les prérequis
-    if ! check_command terraform; then
-        log_error "Terraform n'est pas installé"
+    if ! check_command ansible; then
+        log_error "Ansible n'est pas installé"
+        log_info "Veuillez d'abord installer les outils via le menu principal"
         return 1
     fi
     
-    # TODO: Implémenter la logique de provisionnement cloud
-    echo "Initialisation de Terraform..."
-    echo "Création des ressources cloud..."
+    # Vérifier que le dossier cloud existe
+    if [ ! -d "cloud" ]; then
+        log_error "Le dossier 'cloud' n'existe pas dans le répertoire courant"
+        return 1
+    fi
     
-    log_info "Provisionnement cloud en cours de développement..."
+    # Vérifier que le script configure.sh existe et est exécutable
+    if [ ! -f "cloud/configure.sh" ] || [ ! -x "cloud/configure.sh" ]; then
+        log_error "Le script configure.sh n'existe pas ou n'est pas exécutable"
+        return 1
+    fi
+    
+    # Sauvegarder le répertoire courant
+    local original_dir=$(pwd)
+    
+    # Changer vers le dossier cloud
+    cd cloud
+    
+    # Lancer le script configure.sh en mode interactif
+    log_info "Lancement du menu de configuration cloud..."
+    log_info "Vous allez pouvoir choisir l'environnement (Ubuntu Dev, Rocky Dev, ou Dockgit)"
+    log_info "et configurer la connexion (IP, utilisateur, mot de passe/clé SSH)"
+    echo
+    
+    # Attendre que l'utilisateur appuie sur une touche
+    wait_for_key
+    
+    if ./configure.sh; then
+        log_success "Provisionnement cloud terminé avec succès !"
+    else
+        log_error "Erreur lors du provisionnement cloud"
+        cd "$original_dir"
+        return 1
+    fi
+    
+    # Retourner au répertoire parent
+    cd "$original_dir"
 }
 
 

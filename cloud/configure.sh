@@ -5,28 +5,32 @@
 
 set -e
 
-# Couleurs pour l'affichage
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Couleurs pour l'affichage (cohérentes avec le launcher principal)
+readonly CLOUD_NORMAL="\033[0m"
+readonly CLOUD_HIGHLIGHT="\033[1;37;44m"    # blanc gras sur fond bleu
+readonly CLOUD_TEXT="\033[0;33m"            # or sombre
+readonly CLOUD_TITLE="\033[1;35m"           # violet clair subtil
+readonly CLOUD_BORDER="\033[0;35m"          # violet profond
+readonly CLOUD_ERROR="\033[1;31m"           # rouge pour les erreurs
+readonly CLOUD_SUCCESS="\033[1;32m"         # vert pour les succès
+readonly CLOUD_WARNING="\033[1;93m"         # jaune pour les avertissements
+readonly CLOUD_INFO="\033[0;34m"            # bleu pour les infos
 
-# Fonction d'affichage avec couleurs
+# Fonction d'affichage avec couleurs (cohérentes avec le launcher principal)
 print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${CLOUD_INFO}[INFO]${CLOUD_NORMAL} $1"
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${CLOUD_SUCCESS}[SUCCESS]${CLOUD_NORMAL} $1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${CLOUD_WARNING}[WARNING]${CLOUD_NORMAL} $1"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${CLOUD_ERROR}[ERROR]${CLOUD_NORMAL} $1"
 }
 
 # Fonction pour valider une adresse IP
@@ -154,9 +158,10 @@ run_playbook() {
     # Exécuter le playbook
     if ansible-playbook -i inventory.ini playbook.yml -v; then
         print_success "Playbook exécuté avec succès pour $env_type !"
+        return 0
     else
         print_error "Erreur lors de l'exécution du playbook pour $env_type"
-        exit 1
+        return 1
     fi
     
     cd - > /dev/null
@@ -245,23 +250,122 @@ configure_environment() {
     
     # Créer l'inventaire et exécuter le playbook
     create_inventory "$env_type" "$ip" "$user" "$auth_method" "$password_or_key"
-    run_playbook "$env_type"
+    
+    if run_playbook "$env_type"; then
+        # Afficher le message de succès et attendre
+        echo
+        print_success "Provisionnement de $env_type terminé avec succès !"
+        echo
+        print_info "Résumé du provisionnement :"
+        echo "  • Environnement : $env_type"
+        echo "  • Serveur : $ip"
+        echo "  • Utilisateur : $user"
+        echo "  • Méthode d'authentification : $auth_method"
+        echo
+        print_info "Vous pouvez maintenant utiliser votre environnement provisionné."
+        echo
+        wait_for_cloud_key
+    else
+        # Afficher le message d'erreur et attendre
+        echo
+        print_error "Le provisionnement de $env_type a échoué !"
+        echo
+        print_info "Vérifiez :"
+        echo "  • La connectivité réseau vers $ip"
+        echo "  • Les identifiants de connexion"
+        echo "  • Les logs Ansible ci-dessus"
+        echo
+        wait_for_cloud_key
+        return 1
+    fi
 }
 
-# Menu principal
-show_menu() {
-    echo
-    print_info "=== Configuration Cloud avec Ansible ==="
-    echo
-    echo "Choisissez l'environnement à provisionner :"
-    echo "1) Ubuntu Dev (K3s + ArgoCD + Coder + Podman)"
-    echo "2) Rocky Dev (K3s + ArgoCD + Coder + Podman)"
-    echo "3) Dockgit (Forgejo + Harbor + Podman)"
-    echo "4) Quitter"
-    echo
+# ==============================
+# FONCTIONS D'INTERFACE CLOUD
+# ==============================
+
+# Configuration du menu cloud
+readonly CLOUD_MENU_WIDTH=60
+readonly CLOUD_SCRIPT_NAME="CLOUD PROVISIONING - ANSIBLE AUTOMATION"
+
+# Options des menus cloud
+readonly CLOUD_ENV_OPTIONS=("Ubuntu Dev" "Rocky Dev" "Dockgit" "Retour")
+
+# Variables globales cloud
+selected_cloud=0
+
+# Couleurs déjà définies en haut du fichier
+
+# Fonctions d'interface cloud
+draw_cloud_border_top() {
+    printf "${CLOUD_BORDER}╔"
+    printf '═%.0s' $(seq 1 $CLOUD_MENU_WIDTH)
+    printf "╗\n"
 }
 
-# Script principal
+draw_cloud_border_bottom() {
+    printf "${CLOUD_BORDER}╚"
+    printf '═%.0s' $(seq 1 $CLOUD_MENU_WIDTH)
+    printf "╝\n${CLOUD_NORMAL}"
+}
+
+draw_cloud_separator() {
+    printf "${CLOUD_BORDER}╠"
+    printf '═%.0s' $(seq 1 $CLOUD_MENU_WIDTH)
+    printf "╣\n"
+}
+
+draw_cloud_title() {
+    local title="$1"
+    local padding=$(( (CLOUD_MENU_WIDTH - ${#title}) / 2 ))
+    
+    printf "${CLOUD_BORDER}║"
+    printf ' %.0s' $(seq 1 $padding)
+    printf "${CLOUD_TITLE}%s${CLOUD_BORDER}" "$title"
+    printf ' %.0s' $(seq 1 $((CLOUD_MENU_WIDTH - padding - ${#title})))
+    printf "║\n"
+}
+
+draw_cloud_option() {
+    local option="$1"
+    local is_selected="$2"
+    
+    if [ "$is_selected" = "true" ]; then
+        printf "${CLOUD_BORDER}║${CLOUD_HIGHLIGHT} %-58s ${CLOUD_BORDER}║\n" "$option"
+    else
+        printf "${CLOUD_BORDER}║${CLOUD_TEXT} %-58s ${CLOUD_BORDER}║\n" "$option"
+    fi
+}
+
+draw_cloud_menu() {
+    local title="$1"
+    shift
+    local options=("$@")
+    
+    clear
+    
+    draw_cloud_border_top
+    draw_cloud_title "$title"
+    draw_cloud_separator
+    
+    for i in "${!options[@]}"; do
+        if [ $i -eq $selected_cloud ]; then
+            draw_cloud_option "${options[$i]}" "true"
+        else
+            draw_cloud_option "${options[$i]}" "false"
+        fi
+    done
+    
+    draw_cloud_border_bottom
+    echo -e "\n  ↑ ↓ pour naviguer, Entrée pour valider, q pour quitter"
+}
+
+wait_for_cloud_key() {
+    echo -e "\n${CLOUD_TEXT}Appuyez sur une touche pour continuer...${CLOUD_NORMAL}"
+    read -rsn1
+}
+
+# Script principal avec interface clavier
 main() {
     # Vérifier que nous sommes dans le bon répertoire
     if [[ ! -d "cloud" && ! -f "configure.sh" ]]; then
@@ -269,31 +373,43 @@ main() {
         exit 1
     fi
     
+    # Mode interactif avec navigation clavier
     while true; do
-        show_menu
-        read -p "Votre choix (1-4) : " choice
+        draw_cloud_menu "$CLOUD_SCRIPT_NAME" "${CLOUD_ENV_OPTIONS[@]}"
         
-        case $choice in
-            1)
-                configure_environment "ubuntu-dev"
+        read -rsn1 key
+        case "$key" in
+            $'\x1b')
+                read -rsn2 key2
+                case "$key2" in
+                    "[A") ((selected_cloud--)); [ $selected_cloud -lt 0 ] && selected_cloud=$((${#CLOUD_ENV_OPTIONS[@]}-1)) ;;
+                    "[B") ((selected_cloud++)); [ $selected_cloud -ge ${#CLOUD_ENV_OPTIONS[@]} ] && selected_cloud=0 ;;
+                esac
                 ;;
-            2)
-                configure_environment "rocky-dev"
+            "")
+                case "${CLOUD_ENV_OPTIONS[$selected_cloud]}" in
+                    "Ubuntu Dev")
+                        configure_environment "ubuntu-dev"
+                        ;;
+                    "Rocky Dev")
+                        configure_environment "rocky-dev"
+                        ;;
+                    "Dockgit")
+                        configure_environment "dockgit"
+                        ;;
+                    "Retour")
+                        clear
+                        echo -e "${CLOUD_SUCCESS}Retour au menu principal ! 👋${CLOUD_NORMAL}"
+                        exit 0
+                        ;;
+                esac
                 ;;
-            3)
-                configure_environment "dockgit"
-                ;;
-            4)
-                print_info "Au revoir !"
+            q)
+                clear
+                echo -e "${CLOUD_SUCCESS}Au revoir ! 👋${CLOUD_NORMAL}"
                 exit 0
                 ;;
-            *)
-                print_error "Choix invalide. Veuillez choisir entre 1 et 4."
-                ;;
         esac
-        
-        echo
-        read -p "Appuyez sur Entrée pour continuer..."
     done
 }
 
