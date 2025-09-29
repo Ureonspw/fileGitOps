@@ -27,6 +27,7 @@
           - wget
           - tar
           - openssl
+          - python3-pip
         state: present
 
     - name: Create containers configuration directory
