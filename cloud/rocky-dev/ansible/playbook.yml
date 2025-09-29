@@ -25,6 +25,7 @@
           - wget
           - python3-pip
           - python3-packaging
+          - git
         state: present
 
     - name: Install Python Kubernetes library

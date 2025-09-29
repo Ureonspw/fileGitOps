@@ -28,6 +28,7 @@
           - tar
           - openssl
           - python3-pip
+          - git
         state: present
 
     - name: Create containers configuration directory
