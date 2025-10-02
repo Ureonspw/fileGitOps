@@ -675,6 +675,28 @@ delete_rocky_provision() {
         cd - > /dev/null
     fi
     
+    # Exécuter terraform destroy pour nettoyer les ressources
+    if [ -d "$ROCKY_PATH/terraform" ]; then
+        log_info "Nettoyage des ressources Terraform..."
+        cd "$ROCKY_PATH/terraform"
+        
+        # Vérifier que terraform est disponible
+        if command -v terraform &> /dev/null; then
+            # Vérifier si des ressources existent
+            if terraform state list 2>/dev/null | grep -q .; then
+                log_info "Destruction des ressources Terraform..."
+                terraform destroy -auto-approve 2>/dev/null || log_warning "Erreur lors de terraform destroy"
+            else
+                log_info "Aucune ressource Terraform à détruire"
+            fi
+        else
+            log_warning "Terraform n'est pas disponible, impossible de nettoyer les ressources"
+        fi
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
+    fi
+    
     # Attendre un peu pour s'assurer que tous les processus sont terminés
     sleep 2
     
@@ -720,6 +742,28 @@ delete_ubuntu_provision() {
         # Détruire les VMs
         log_info "Destruction des VMs..."
         vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire ou erreur lors de la destruction"
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
+    fi
+    
+    # Exécuter terraform destroy pour nettoyer les ressources
+    if [ -d "$UBUNTU_PATH/terraform" ]; then
+        log_info "Nettoyage des ressources Terraform..."
+        cd "$UBUNTU_PATH/terraform"
+        
+        # Vérifier que terraform est disponible
+        if command -v terraform &> /dev/null; then
+            # Vérifier si des ressources existent
+            if terraform state list 2>/dev/null | grep -q .; then
+                log_info "Destruction des ressources Terraform..."
+                terraform destroy -auto-approve 2>/dev/null || log_warning "Erreur lors de terraform destroy"
+            else
+                log_info "Aucune ressource Terraform à détruire"
+            fi
+        else
+            log_warning "Terraform n'est pas disponible, impossible de nettoyer les ressources"
+        fi
         
         # Retourner au répertoire parent
         cd - > /dev/null
@@ -801,6 +845,28 @@ delete_serverRepo_provision() {
         # Détruire les VMs
         log_info "Destruction des VMs..."
         vagrant destroy -f 2>/dev/null || log_warning "Aucune VM à détruire ou erreur lors de la destruction"
+        
+        # Retourner au répertoire parent
+        cd - > /dev/null
+    fi
+    
+    # Exécuter terraform destroy pour nettoyer les ressources
+    if [ -d "$SERVERREPO_PATH/terraform" ]; then
+        log_info "Nettoyage des ressources Terraform..."
+        cd "$SERVERREPO_PATH/terraform"
+        
+        # Vérifier que terraform est disponible
+        if command -v terraform &> /dev/null; then
+            # Vérifier si des ressources existent
+            if terraform state list 2>/dev/null | grep -q .; then
+                log_info "Destruction des ressources Terraform..."
+                terraform destroy -auto-approve 2>/dev/null || log_warning "Erreur lors de terraform destroy"
+            else
+                log_info "Aucune ressource Terraform à détruire"
+            fi
+        else
+            log_warning "Terraform n'est pas disponible, impossible de nettoyer les ressources"
+        fi
         
         # Retourner au répertoire parent
         cd - > /dev/null

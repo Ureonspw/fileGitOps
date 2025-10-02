@@ -386,6 +386,303 @@ EOF
 
 chmod +x veruser.sh
 
+# === Création du script pONCoder.sh ===
+cat << 'EOF' > pONCoder.sh
+#!/bin/bash
+
+# === Script pour lancer Coder en arrière-plan ===
+
+# Détection automatique de l'utilisateur avec UID 1000
+USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+if [ -z "$USER_UID1000" ]; then
+  echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+  exit 1
+fi
+
+LOG_DIR="/home/$USER_UID1000/scripts"
+mkdir -p "$LOG_DIR"
+
+# Vérifier si Coder est déjà en cours d'exécution
+if [ -f "$LOG_DIR/coder.pid" ]; then
+  PID=$(cat "$LOG_DIR/coder.pid")
+  if ps -p $PID > /dev/null 2>&1; then
+    echo "⚠️  Coder est déjà en cours d'exécution avec le PID $PID"
+    echo "💡 Utilisez ./pOFFCoder.sh pour l'arrêter d'abord"
+    exit 1
+  else
+    echo "🧹 Nettoyage du fichier PID obsolète"
+    rm -f "$LOG_DIR/coder.pid"
+  fi
+fi
+
+echo "🚀 Lancement de Coder server en arrière-plan..."
+sudo -u $USER_UID1000 bash -c "nohup coder server > $LOG_DIR/coder.log 2>&1 & echo \$! > $LOG_DIR/coder.pid"
+
+# Vérifier que le PID a été écrit
+if [ ! -f "$LOG_DIR/coder.pid" ]; then
+  echo "❌ Erreur: Impossible de créer le fichier PID"
+  exit 1
+fi
+
+SERVER_PID=$(cat "$LOG_DIR/coder.pid")
+if [ -z "$SERVER_PID" ]; then
+  echo "❌ Erreur: PID vide"
+  exit 1
+fi
+
+echo "✅ Coder server lancé avec succès !"
+echo "📋 PID: $SERVER_PID"
+echo "📁 Logs: $LOG_DIR/coder.log"
+echo "💡 Utilisez ./pOFFCoder.sh pour l'arrêter"
+
+# Attendre un peu pour voir si le serveur démarre correctement
+sleep 3
+if ps -p $SERVER_PID > /dev/null 2>&1; then
+  echo "🎉 Coder server fonctionne correctement !"
+  
+  # === Attente que le lien soit disponible ===
+  echo "⏳ Attente du lien Coder..."
+  for i in {1..30}; do
+    LINK=$(grep -o "https://[a-z0-9]\+\.pit-1\.try\.coder\.app" $LOG_DIR/coder.log | head -n 1 || true)
+    if [ -n "$LINK" ]; then
+      break
+    fi
+    sleep 2
+  done
+  
+  if [ -n "$LINK" ]; then
+    echo "🔗 Lien Coder disponible : $LINK"
+    echo "💡 Vous pouvez maintenant vous connecter à Coder !"
+  else
+    echo "⚠️  Impossible de récupérer le lien Coder automatiquement"
+    echo "📋 Vérifiez les logs: cat $LOG_DIR/coder.log"
+  fi
+else
+  echo "❌ Erreur: Coder server s'est arrêté prématurément"
+  echo "📋 Vérifiez les logs: cat $LOG_DIR/coder.log"
+  exit 1
+fi
+EOF
+
+chmod +x pONCoder.sh
+
+# === Création du script pOFFCoder.sh ===
+cat << 'EOF' > pOFFCoder.sh
+#!/bin/bash
+
+# === Script pour arrêter Coder ===
+
+# Détection automatique de l'utilisateur avec UID 1000
+USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+if [ -z "$USER_UID1000" ]; then
+  echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+  exit 1
+fi
+
+LOG_DIR="/home/$USER_UID1000/scripts"
+PID_FILE="$LOG_DIR/coder.pid"
+
+# Vérifier si le fichier PID existe
+if [ ! -f "$PID_FILE" ]; then
+  echo "⚠️  Aucun fichier PID trouvé. Coder n'est peut-être pas en cours d'exécution."
+  echo "💡 Utilisez ./pONCoder.sh pour le lancer"
+  exit 1
+fi
+
+PID=$(cat "$PID_FILE")
+if [ -z "$PID" ]; then
+  echo "❌ Erreur: Fichier PID vide"
+  rm -f "$PID_FILE"
+  exit 1
+fi
+
+# Vérifier si le processus existe
+if ! ps -p $PID > /dev/null 2>&1; then
+  echo "⚠️  Le processus avec PID $PID n'existe plus"
+  echo "🧹 Nettoyage du fichier PID obsolète"
+  rm -f "$PID_FILE"
+  exit 1
+fi
+
+echo "🛑 Arrêt de Coder server (PID: $PID)..."
+
+# Tenter un arrêt propre avec SIGTERM
+kill -TERM $PID
+
+# Attendre jusqu'à 10 secondes pour un arrêt propre
+for i in {1..10}; do
+  if ! ps -p $PID > /dev/null 2>&1; then
+    echo "✅ Coder server arrêté proprement"
+    rm -f "$PID_FILE"
+    exit 0
+  fi
+  echo "⏳ Attente de l'arrêt... ($i/10)"
+  sleep 1
+done
+
+# Si le processus ne s'arrête pas, forcer avec SIGKILL
+echo "⚠️  Arrêt forcé avec SIGKILL..."
+kill -KILL $PID
+
+# Vérifier que le processus est bien arrêté
+if ! ps -p $PID > /dev/null 2>&1; then
+  echo "✅ Coder server arrêté avec succès"
+  rm -f "$PID_FILE"
+else
+  echo "❌ Erreur: Impossible d'arrêter Coder server"
+  exit 1
+fi
+EOF
+
+chmod +x pOFFCoder.sh
+
+# === Création du script pONArgoCD.sh ===
+cat << 'EOF' > pONArgoCD.sh
+#!/bin/bash
+
+# === Script pour lancer ArgoCD port-forward en arrière-plan ===
+
+# Détection automatique de l'utilisateur avec UID 1000
+USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+if [ -z "$USER_UID1000" ]; then
+  echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+  exit 1
+fi
+
+LOG_DIR="/home/$USER_UID1000/scripts"
+mkdir -p "$LOG_DIR"
+
+# Vérifier si ArgoCD port-forward est déjà en cours d'exécution
+if [ -f "$LOG_DIR/argocd.pid" ]; then
+  PID=$(cat "$LOG_DIR/argocd.pid")
+  if ps -p $PID > /dev/null 2>&1; then
+    echo "⚠️  ArgoCD port-forward est déjà en cours d'exécution avec le PID $PID"
+    echo "💡 Utilisez ./pOFFArgoCD.sh pour l'arrêter d'abord"
+    exit 1
+  else
+    echo "🧹 Nettoyage du fichier PID obsolète"
+    rm -f "$LOG_DIR/argocd.pid"
+  fi
+fi
+
+# Vérifier que k3s est disponible
+if ! command -v k3s &> /dev/null; then
+  echo "❌ Erreur: k3s n'est pas installé ou pas dans le PATH"
+  exit 1
+fi
+
+# Vérifier que le namespace argocd existe
+if ! sudo k3s kubectl get namespace argocd &> /dev/null; then
+  echo "❌ Erreur: Le namespace 'argocd' n'existe pas"
+  echo "💡 Assurez-vous qu'ArgoCD est installé"
+  exit 1
+fi
+
+echo "🚀 Lancement d'ArgoCD port-forward en arrière-plan..."
+sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd > "$LOG_DIR/argocd.log" 2>&1 &
+echo $! > "$LOG_DIR/argocd.pid"
+
+# Vérifier que le PID a été écrit
+if [ ! -f "$LOG_DIR/argocd.pid" ]; then
+  echo "❌ Erreur: Impossible de créer le fichier PID"
+  exit 1
+fi
+
+ARGOCD_PID=$(cat "$LOG_DIR/argocd.pid")
+if [ -z "$ARGOCD_PID" ]; then
+  echo "❌ Erreur: PID vide"
+  exit 1
+fi
+
+echo "✅ ArgoCD port-forward lancé avec succès !"
+echo "📋 PID: $ARGOCD_PID"
+echo "📁 Logs: $LOG_DIR/argocd.log"
+echo "🌐 ArgoCD accessible sur: http://$(hostname -I | awk '{print $1}'):8090"
+echo "💡 Utilisez ./pOFFArgoCD.sh pour l'arrêter"
+
+# Attendre un peu pour voir si le port-forward démarre correctement
+sleep 3
+if ps -p $ARGOCD_PID > /dev/null 2>&1; then
+  echo "🎉 ArgoCD port-forward fonctionne correctement !"
+else
+  echo "❌ Erreur: ArgoCD port-forward s'est arrêté prématurément"
+  echo "📋 Vérifiez les logs: cat $LOG_DIR/argocd.log"
+  exit 1
+fi
+EOF
+
+chmod +x pONArgoCD.sh
+
+# === Création du script pOFFArgoCD.sh ===
+cat << 'EOF' > pOFFArgoCD.sh
+#!/bin/bash
+
+# === Script pour arrêter ArgoCD port-forward ===
+
+# Détection automatique de l'utilisateur avec UID 1000
+USER_UID1000=$(getent passwd 1000 | cut -d: -f1)
+if [ -z "$USER_UID1000" ]; then
+  echo "❌ Erreur: Aucun utilisateur avec UID 1000 trouvé"
+  exit 1
+fi
+
+LOG_DIR="/home/$USER_UID1000/scripts"
+PID_FILE="$LOG_DIR/argocd.pid"
+
+# Vérifier si le fichier PID existe
+if [ ! -f "$PID_FILE" ]; then
+  echo "⚠️  Aucun fichier PID trouvé. ArgoCD port-forward n'est peut-être pas en cours d'exécution."
+  echo "💡 Utilisez ./pONArgoCD.sh pour le lancer"
+  exit 1
+fi
+
+PID=$(cat "$PID_FILE")
+if [ -z "$PID" ]; then
+  echo "❌ Erreur: Fichier PID vide"
+  rm -f "$PID_FILE"
+  exit 1
+fi
+
+# Vérifier si le processus existe
+if ! ps -p $PID > /dev/null 2>&1; then
+  echo "⚠️  Le processus avec PID $PID n'existe plus"
+  echo "🧹 Nettoyage du fichier PID obsolète"
+  rm -f "$PID_FILE"
+  exit 1
+fi
+
+echo "🛑 Arrêt d'ArgoCD port-forward (PID: $PID)..."
+
+# Tenter un arrêt propre avec SIGTERM
+kill -TERM $PID
+
+# Attendre jusqu'à 10 secondes pour un arrêt propre
+for i in {1..10}; do
+  if ! ps -p $PID > /dev/null 2>&1; then
+    echo "✅ ArgoCD port-forward arrêté proprement"
+    rm -f "$PID_FILE"
+    exit 0
+  fi
+  echo "⏳ Attente de l'arrêt... ($i/10)"
+  sleep 1
+done
+
+# Si le processus ne s'arrête pas, forcer avec SIGKILL
+echo "⚠️  Arrêt forcé avec SIGKILL..."
+kill -KILL $PID
+
+# Vérifier que le processus est bien arrêté
+if ! ps -p $PID > /dev/null 2>&1; then
+  echo "✅ ArgoCD port-forward arrêté avec succès"
+  rm -f "$PID_FILE"
+else
+  echo "❌ Erreur: Impossible d'arrêter ArgoCD port-forward"
+  exit 1
+fi
+EOF
+
+chmod +x pOFFArgoCD.sh
+
 
 
 
@@ -414,6 +711,10 @@ echo " lancer coder server en arrière-plan :"
 echo "   sudo -u vagrant bash -c \"nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid\""
 echo " 🔧 Pour adapter le script à votre utilisateur : ./veruser.sh"
 echo " 🚀 Pour créer le template : ./lancement.sh"
+echo " 🌐 Pour lancer ArgoCD port-forward en arrière-plan : ./pONArgoCD.sh"
+echo " ⏹️  Pour arrêter ArgoCD port-forward : ./pOFFArgoCD.sh"
+echo " ▶️  Pour lancer Coder en arrière-plan : ./pONCoder.sh"
+echo " ⏹️  Pour arrêter Coder : ./pOFFCoder.sh"
 echo "=============================================="
 
 echo "✅ Installation complète terminée avec succès"
