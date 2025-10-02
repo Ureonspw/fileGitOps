@@ -691,6 +691,29 @@ EOF
 
 chmod +x pOFFArgoCD.sh
 
+# === Création du fichier display_information.txt ===
+cat << EOF > display_information.txt
+==============================================
+ 🌍 Accédez à ArgoCD :
+
+ 👤 Username : admin
+ 🔑 Password : $ARGOCD_PWD
+ Lien : http://$VM_IP:8090
+
+ Lancez la commande suivante pour exposer ArgoCD :
+   sudo k3s kubectl port-forward --address 0.0.0.0 service/argocd-server 8090:80 -n argocd
+ 🌐 Pour lancer ArgoCD port-forward en arrière-plan : ./pONArgoCD.sh
+ ⏹️  Pour arrêter ArgoCD port-forward : ./pOFFArgoCD.sh
+ lancer code server : coder server
+ lancer coder server en arrière-plan :
+   sudo -u vagrant bash -c "nohup coder server > /home/vagrant/coder.log 2>&1 & echo \$! > /home/vagrant/coder.pid"
+ 🔧 Pour adapter le script à votre utilisateur : ./veruser.sh
+ 🚀 Pour créer le template : ./lancement.sh
+ ▶️  Pour lancer Coder en arrière-plan : ./pONCoder.sh
+ ⏹️  Pour arrêter Coder : ./pOFFCoder.sh
+==============================================
+EOF
+
 
 
 

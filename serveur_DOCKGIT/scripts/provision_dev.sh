@@ -157,6 +157,18 @@ sudo cp $CERT_DIR/harbor.crt /etc/containers/certs.d/$VM_IP/ca.crt
 
 
 
+# === Création du fichier display_information.txt ===
+cat << EOF > display_information.txt
+======================================================
+ Harbor est installé avec succès !
+ Accès web : https://$VM_IP
+ Login : admin / $HARBOR_PASSWORD
+ 
+ Forgejo est installé avec succès !
+ Accès web : http://$VM_IP:3001
+======================================================
+EOF
+
 echo "======================================================="
 echo " Harbor est installé avec succès !"
 echo " Accès web : https://$VM_IP"
